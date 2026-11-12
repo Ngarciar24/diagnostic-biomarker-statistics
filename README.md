@@ -52,21 +52,20 @@ R vs Python/SQL: 25/25 values agree (tolerance 1e-10)
 
 ```r
 renv::restore()                                    # R 4.6, packages from renv.lock (limma from Bioconductor)
-testthat::test_dir("tests/testthat")
 ```
 
 ```sh
-quarto render                                      # builds the book into _book/
-python3 python/check_sap.py                        # standard library only
-python3 -m pytest python
-Rscript mock_sap/simulate_study.R                  # only to regenerate the mock study data
+Rscript run_all.R                                  # R tests, render the book, Python/SQL checks; stops on the first failure
 ```
+
+The steps can also run one by one: `testthat::test_dir("tests/testthat")`, `quarto render`, `python3 python/check_sap.py` (standard library only) and `python3 -m pytest python`. `Rscript mock_sap/simulate_study.R` regenerates the mock study data and is only needed if the simulation changes.
 
 Requires Quarto ≥ 1.6 and R ≥ 4.6. On Linux, `epiR` needs the udunits2, GDAL, GEOS and PROJ system libraries (see the CI workflow).
 
 ## Layout
 
 ```
+run_all.R                   one command: tests, book, Python checks
 index.qmd, chapters/        the book (12 chapters)
 mock_sap/                   SAP template, filled mock SAP, simulation script and data, note on SAPs in a regulated R environment
 R/                          helper functions used by the chapters
