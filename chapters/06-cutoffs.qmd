@@ -1,0 +1,221 @@
+---
+title: "Cut-offs, two-cut-off designs and the intermediate zone"
+---
+
+```{r setup}
+#| include: false
+source("../R/helpers.R")
+suppressMessages({library(knitr); library(ggplot2); library(cutpointr); library(OptimalCutpoints); library(pROC)})
+select <- dplyr::select
+```
+
+Tags: **[S]** primary public source, **[Y]** synthesis of standard theory, not a quotation, **[D]** derived by arithmetic from a cited count. The lab uses **simulated** data only.
+
+## Concept
+
+| Idea | Meaning |
+|---|---|
+| Single cut-off | one threshold; Youden (max Se+Sp−1), a targeted Se or Sp, or cost-weighted |
+| Two cut-offs | **rule-out** cut-off set for sensitivity/NPV; **rule-in** cut-off set for specificity/PPV |
+| Intermediate ("grey") zone | results between the two; the price paid for high predictive values |
+| Lock before validation | derive on one cohort, freeze, validate on another; never re-tune on validation data |
+| Spectrum and prevalence | the same cut-offs give different zone fractions and PPV/NPV in primary vs specialty care |
+
+Grey-zone approach: Coste & Pouchot, *Int J Epidemiol* 2003;32:304-313 [S: abstract]: a three-zone partition whose width depends on the separation of the group means, variability, and the accepted misclassification risks. TG-ROC plots sensitivity and specificity against the threshold so the zone limits can be read off.
+
+## Regulatory anchor and worked example: Elecsys Phospho-Tau (217P) Plasma
+
+Facts below were read from the **FDA 510(k) Decision Summary K261686** (37 pp.) and re-checked against the PDF for the tables marked ✔. The other rows come from the sources listed at the end of the chapter.
+
+| Item | Value | Source |
+|---|---|---|
+| 510(k) / decision | K261686, decision **2026-08-19**, SESE, Class II, 21 CFR 866.5840 "Alzheimer's Disease Pathology Assessment Test" | FDA-DS p.1, openFDA record |
+| Predicate | Lumipulse G pTau 217/beta-Amyloid 1-42 Plasma Ratio, K242706 ✔ | FDA-DS p.4 |
+| Indication | aid in identifying amyloid pathology in patients with cognitive decline, plasma of individuals ≥ 55 years, used with other clinical information ✔ | FDA-DS p.2 |
+| Cut-offs (pg/mL) | **Negative ≤ 0.223; Intermediate > 0.223 to ≤ 0.378; Positive > 0.378** ✔ | FDA-DS p.3 |
+| Cut-off derivation cohort | 687 banked samples; 286 PET+ (41.6%); the selection rule for 0.223/0.378 is **not stated** | FDA-DS p.20 |
+| Pivotal cohort | N = 958; 378 PET+ (39.5%); reference = amyloid PET visual read by 6 blinded readers; CSF only as a tie-breaker | FDA-DS pp.22-26 |
+| Monitoring / dementia prediction | **Not** in the decision summary; stated in the Roche 24 Aug 2026 release only | ROCHE-0824 |
+
+**Pivotal 3×2 table** ✔ (FDA-DS p.26):
+
+```{r fda-table}
+fda <- matrix(c(285, 37, 72, 119, 21, 424), ncol = 2, byrow = TRUE,
+              dimnames = list(Assay = c("Positive (>0.378)", "Intermediate", "Negative (<=0.223)"),
+                              `Amyloid PET` = c("PET+", "PET-")))
+kable(addmargins(fda))
+```
+
+Reproduce what FDA reported, then compare **our** CI methods with theirs:
+
+```{r fda-repro}
+N <- sum(fda); pet_pos <- sum(fda[, 1]); pet_neg <- sum(fda[, 2])
+rows <- list(
+  c("PPA (positive among PET+)", 285, pet_pos, "75.4 (70.8-79.5)"),
+  c("NPA (negative among PET-)", 424, pet_neg, "73.1 (69.4-76.6)"),
+  c("PPV of positive", 285, 322, "88.5 (84.9-91.4)"),
+  c("NPV of negative", 424, 445, "95.3 (93.1-96.8)"))
+out <- do.call(rbind, lapply(rows, function(r) {
+  x <- as.numeric(r[2]); n <- as.numeric(r[3]); w <- ci_wilson(x, n); cp <- ci_clopper_pearson(x, n)
+  data.frame(Measure = r[1], `FDA reported` = r[4],
+             `Wilson` = sprintf("%.1f (%.1f-%.1f)", 100 * w[1], 100 * w[2], 100 * w[3]),
+             `Clopper-Pearson` = sprintf("%.1f (%.1f-%.1f)", 100 * cp[1], 100 * cp[2], 100 * cp[3]),
+             check.names = FALSE)}))
+kable(out, caption = "FDA CIs vs ours. FDA states the PV CIs derive from likelihood-ratio CIs; the PPA/NPA CI method is not stated")
+```
+
+Our Wilson intervals reproduce FDA's PPA and NPA CIs to the printed digit (70.8-79.5, 69.4-76.6), so Wilson is the likely method [D: inference, not stated by FDA]. The PV CIs differ slightly because FDA derives them from likelihood-ratio CIs.
+
+The **PPA/NPA are low (≈75%)** because intermediates count as misses (denominators include all PET+ and PET−). The headline strength is in the categories: **PV 88.5% for positive, 95.3% NPV for negative, 19.9% (191/958) intermediate** ✔. Derived [D] from the counts above (no CI in the FDA summary):
+
+```{r derived}
+d <- rbind(
+  c("Rule-out step: not-negative among PET+ (357/378)", 357, 378),
+  c("Rule-in step: not-positive among PET- (543/580)", 543, 580),
+  c("Intermediate fraction (191/958)", 191, 958))
+kable(data.frame(Quantity = d[, 1],
+  `Estimate (Wilson 95% CI), %` = sapply(seq_len(nrow(d)), function(i) {
+    w <- ci_wilson(as.numeric(d[i, 2]), as.numeric(d[i, 3]))
+    sprintf("%.1f (%.1f-%.1f)", 100 * w[1], 100 * w[2], 100 * w[3]) }), check.names = FALSE))
+```
+
+Also FDA's decision logic is worth noting: the **PV is judged "statistically higher than prevalence"** (lower CI bound 84.9% > prevalence 39.5%), a comparison with the prevalence rather than a pre-specified performance goal; none of a sample-size calculation or goal was found in the text read. ✔ (FDA-DS p.27)
+
+**Known blemishes in the summary** (do not copy tables uncritically) ✔: p.26 says "pre-specified cut-offs of 0.225 pg/mL" while the table uses 0.223, and "prevalence 13.1%" in one sentence vs 39.5% elsewhere.
+
+**What the two papers do and do not give.** Both use the *prototype* assay, not the cleared one, and neither reports 0.223/0.378. *Hibar et al., Alzheimers Dement 2026;22(1):e71009*: five cohorts, N = 2,148, single rule-out cut-off 0.189 pg/mL, no intermediate zone; e.g. cognitively impaired (n = 538) sensitivity 98.98%, specificity 29.17%, NPV 92.51% [S]. *Hortsch et al., J Prev Alzheimers Dis 2026;13(5):100534*: APPROACH, N = 588, centiloid reference, exploratory double cut-off at 90% PPA / 90% NPA, **indeterminate 5.78% at centiloid 30**, Wilson CIs, eGFR distribution reported and "higher pTau217 with worse kidney function" [S]. Nothing here is the pivotal data behind the clearance.
+
+## Analysis in R (simulated data)
+
+### Cohorts
+
+pTau217-*like*: log10 concentration normal in both groups, higher in amyloid-positive.
+
+```{r sim}
+sim_cohort <- function(n, prev, seed, egfr_shift = FALSE) {
+  set.seed(seed)
+  y <- rbinom(n, 1, prev)
+  lx <- ifelse(y == 1, rnorm(n, -0.20, 0.30), rnorm(n, -0.80, 0.25))
+  egfr <- round(pmin(120, pmax(8, rnorm(n, 78, 22))))
+  if (egfr_shift) lx <- lx + ifelse(egfr >= 60, 0, ifelse(egfr >= 30, 0.10, 0.30))  # assumed effect
+  data.frame(y, x = 10^lx, egfr)
+}
+train <- sim_cohort(700, 0.40, 61)      # derivation cohort
+valid <- sim_cohort(950, 0.40, 62)      # separate validation cohort
+c(train_AUC = as.numeric(auc(roc(train$y, train$x, quiet = TRUE, direction = "<"))),
+  valid_AUC = as.numeric(auc(roc(valid$y, valid$x, quiet = TRUE, direction = "<"))))
+```
+
+### Derive the two cut-offs on the derivation cohort
+
+Targets (assumed): sensitivity ≥ 94% for the rule-out step, specificity ≥ 93% for the rule-in step, chosen to resemble the derived operating points of the public pivotal data. [Y]
+
+```{r derive}
+co <- derive_two_cutoffs(train$x, train$y, 0.94, 0.93)
+# cross-check 1: cutpointr
+a <- cutpointr(train, x, y, pos_class = 1, neg_class = 0, direction = ">=",
+               method = maximize_metric, metric = spec_constrain, min_constrain = 0.94)
+b <- cutpointr(train, x, y, pos_class = 1, neg_class = 0, direction = ">=",
+               method = maximize_metric, metric = sens_constrain, min_constrain = 0.93)
+# cross-check 2: OptimalCutpoints
+oc_lo <- optimal.cutpoints(X = "x", status = "y", tag.healthy = 0, methods = "ValueSe",
+                           control = control.cutpoints(valueSe = 0.94), data = train)
+oc_hi <- optimal.cutpoints(X = "x", status = "y", tag.healthy = 0, methods = "ValueSp",
+                           control = control.cutpoints(valueSp = 0.93), data = train)
+pick <- function(o, nm) as.numeric(o$Global$optimal.cutoff[[nm]])[1]
+oc_lo_c <- pick(oc_lo$ValueSe, "cutoff"); oc_lo_se <- pick(oc_lo$ValueSe, "Se")
+oc_hi_c <- pick(oc_hi$ValueSp, "cutoff"); oc_hi_sp <- pick(oc_hi$ValueSp, "Sp")
+se_at <- function(c) mean(train$x[train$y == 1] > c)
+sp_at <- function(c) mean(train$x[train$y == 0] <= c)
+kable(data.frame(
+  Method = c("hand", "cutpointr", "OptimalCutpoints"),
+  `Rule-out cut-off` = round(c(co[["lo"]], a$optimal_cutpoint, oc_lo_c), 4),
+  `Sens at it` = round(c(se_at(co[["lo"]]), a$sensitivity, oc_lo_se), 4),
+  `Rule-in cut-off` = round(c(co[["hi"]], b$optimal_cutpoint, oc_hi_c), 4),
+  `Spec at it` = round(c(sp_at(co[["hi"]]), b$specificity, oc_hi_sp), 4),
+  check.names = FALSE), caption = "Same targets, three tools")
+```
+
+Sensitivity is identical across the three at the rule-out step. The rule-in cut-offs can differ by one observation depending on each tool's tie and boundary convention (≥ versus >); the hand version fixes the FDA convention (positive if > cut-off). A tool can also return a cut-off whose observed specificity sits just below the target (for example 0.9298 against 0.93) when it interpolates or treats ties differently, so always recompute the achieved Se and Sp at the reported cut-off rather than trusting the tool's label. [Y]
+
+```{r tgroc}
+#| fig-height: 3.8
+g <- do.call(rbind, lapply(sort(unique(train$x)), function(thr)
+  data.frame(t = thr, Sensitivity = mean(train$x[train$y == 1] > thr), Specificity = mean(train$x[train$y == 0] <= thr))))
+gl <- rbind(data.frame(t = g$t, value = g$Sensitivity, Measure = "Sensitivity (x > t)"),
+            data.frame(t = g$t, value = g$Specificity, Measure = "Specificity (x <= t)"))
+ggplot(gl, aes(t, value, colour = Measure)) + geom_line() + scale_x_log10() +
+  geom_vline(xintercept = unlist(co), linetype = 2) +
+  annotate("rect", xmin = co[["lo"]], xmax = co[["hi"]], ymin = 0, ymax = 1, alpha = .08) +
+  labs(x = "Threshold (pg/mL, log scale)", y = NULL, subtitle = "TG-ROC: shaded = intermediate zone") + theme_minimal()
+```
+
+For comparison, a single Youden cut-off on the same data:
+
+```{r youden}
+yc <- cutpointr(train, x, y, pos_class = 1, neg_class = 0, direction = ">=",
+                method = maximize_metric, metric = youden)
+data.frame(cutoff = yc$optimal_cutpoint, sens = yc$sensitivity, spec = yc$specificity)
+```
+
+### Lock, then validate
+
+```{r validate}
+p <- two_cut_performance(valid$x, valid$y, co[["lo"]], co[["hi"]])
+fm <- function(v) sprintf("%.1f (%.1f-%.1f)", 100 * v[["est"]], 100 * v[["lower"]], 100 * v[["upper"]])
+kable(addmargins(p$table), caption = "Validation cohort, cut-offs locked from the derivation cohort")
+kable(data.frame(
+  Quantity = c("Intermediate fraction", "Rule-out step sensitivity (not-negative among D+)", "Negative result NPV",
+               "Rule-in step specificity", "Positive result PPV",
+               "PPA incl. intermediates (FDA-summary style)", "NPA incl. intermediates"),
+  `Estimate % (Wilson 95% CI)` = c(fm(p$intermediate), fm(p$ruleout_sens), fm(p$ruleout_npv),
+                                    fm(p$rulein_spec), fm(p$rulein_ppv), fm(p$ppa_incl), fm(p$npa_incl)),
+  check.names = FALSE))
+```
+
+How to state the claim when a result can be indeterminate (the FDA summary's practice [S]): report the **fraction** of intermediates, performance of each category, and PPA/NPA with intermediates counted as not-agreeing; the "excluding intermediates" figures alone flatter the test. [Y]
+
+### Prevalence and spectrum change the zones
+
+Same locked cut-offs, three populations: primary care (prev 20%), secondary (40%), memory clinic (60%).
+
+```{r prev}
+res <- do.call(rbind, lapply(c(0.20, 0.40, 0.60), function(pv) {
+  v <- sim_cohort(20000, pv, 63)
+  q <- two_cut_performance(v$x, v$y, co[["lo"]], co[["hi"]])
+  data.frame(Prevalence = pv, `Intermediate %` = round(100 * q$intermediate[["est"]], 1),
+             `PPV positive %` = round(100 * q$rulein_ppv[["est"]], 1),
+             `NPV negative %` = round(100 * q$ruleout_npv[["est"]], 1), check.names = FALSE)}))
+kable(res, caption = "Sens/spec per class unchanged; predictive values and zone fractions move")
+```
+
+The FDA summary itself reports lower PV of positive results in primary care (78.3%, 36/46) than secondary/tertiary (90.2%, 249/276) and a footnote about lower PPV in low-prevalence settings [S: FDA-DS pp.3, 32].
+
+### Kidney function as a covariate (assumed effect)
+
+The FDA summary has **no eGFR-stratified analysis** (only a kidney-disease comorbidity subgroup of N = 24) [S]. Hortsch et al. report higher pTau217 with worse kidney function in their prototype data [S]. Here: an *assumed* upward shift of the log marker in amyloid-negative *and* positive subjects with lower eGFR (+0.10 log10 for eGFR 30-59, +0.30 below 30); cut-offs stay locked.
+
+```{r egfr}
+kv <- sim_cohort(40000, 0.40, 64, egfr_shift = TRUE)
+kv$stage <- cut(kv$egfr, c(0, 30, 60, Inf), right = FALSE, labels = c("<30", "30-59", ">=60"))
+tab <- do.call(rbind, lapply(levels(kv$stage), function(s) {
+  v <- kv[kv$stage == s, ]
+  q <- two_cut_performance(v$x, v$y, co[["lo"]], co[["hi"]])
+  data.frame(eGFR = s, n = nrow(v), `Intermediate %` = round(100 * q$intermediate[["est"]], 1),
+             `Rule-in specificity %` = round(100 * q$rulein_spec[["est"]], 1),
+             `PPV positive %` = round(100 * q$rulein_ppv[["est"]], 1),
+             `Rule-out sensitivity %` = round(100 * q$ruleout_sens[["est"]], 1), check.names = FALSE) }))
+kable(tab, caption = "Effect of an assumed eGFR-dependent shift on locked cut-offs")
+```
+
+Reading: lower eGFR pushes controls into the intermediate and positive zones (specificity of the rule-in step and PPV fall) while sensitivity rises. Options to discuss: eGFR-stratified cut-offs, a flag on the report, or a pre-specified eGFR subgroup analysis in the SAP (Chapter 9). The size of the shift is an assumption. [Y]
+
+## Sources
+
+FDA K261686 numbers were re-checked against the PDF (✔). Unverified items (cut-off selection rule, PPA/NPA CI method, labelling) are marked as such.
+
+```{r sources-06}
+#| echo: false
+#| results: asis
+show_sources(6, "../claims_ledger.csv")
+```

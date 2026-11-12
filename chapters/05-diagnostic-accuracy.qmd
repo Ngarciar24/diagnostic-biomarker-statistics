@@ -1,0 +1,212 @@
+---
+title: "Diagnostic accuracy of binary and continuous tests"
+---
+
+```{r setup}
+#| include: false
+source("../R/helpers.R")
+suppressMessages({library(knitr); library(ggplot2); library(binom); library(epiR)
+  library(DTComPair); library(pROC); library(MASS)})
+select <- dplyr::select
+```
+
+Tags: **[S]** primary public source, **[Y]** synthesis of standard theory, not a quotation. All data simulated.
+
+## Concept
+
+| Measure | Definition | Depends on prevalence? |
+|---|---|---|
+| Sensitivity | P(T+ \| D+) | no, but varies with disease spectrum and case mix |
+| Specificity | P(T− \| D−) | no, but varies with the mix of non-diseased conditions |
+| PPV / NPV | P(D+ \| T+), P(D− \| T−) | **yes** |
+| LR+ / LR− | Se/(1−Sp), (1−Se)/Sp | no |
+| PPA / NPA / OPA | agreement with a *non-reference* comparator | – |
+| AUC | P(case marker > control marker) | no, but spectrum-dependent |
+
+Sensitivity and specificity do not depend on prevalence *by definition*, but a population with milder disease, or with more look-alike conditions among the non-diseased, will give different values. That is why the study population must match the intended use. [Y]
+
+Rule: sensitivity and specificity need a **reference standard**. Without one, report PPA/NPA. [S: FDA 2007]
+
+## Regulatory anchor
+
+| Item | Verified fact | Tag |
+|---|---|---|
+| FDA 2007 *Statistical Guidance on Reporting Results from Studies Evaluating Diagnostic Tests* | Final, issued 13 Mar 2007. "When a new test is evaluated by comparison to a non-reference standard, sensitivity and specificity are not appropriate terms to describe the comparative results." Estimates are called positive and negative percent agreement. Discrepant resolution discussed as biasing | [S] fda.gov/media/71147 |
+| EP12 | **Ed3, 2023-03-07**: binary-output examinations, clinical performance (sens/spec), imprecision near the cut-off (C5/C95), stability, interference | [S] clsi.org |
+| EP24 | **EP24-A2 (2011, reaffirmed 2016)**: ROC-based diagnostic accuracy of continuous tests; concepts, not a recipe | [S] clsi.org |
+| IVDR Annex I 9.1(b) | diagnostic sensitivity, specificity, PPV, NPV, likelihood ratio, expected values | [S] |
+| STARD 2015 | 30 essential items (Bossuyt et al., BMJ 2015;351:h5527) | [S] |
+| QUADAS-2 | 4 domains: patient selection, index test, reference standard, flow and timing (Whiting et al., Ann Intern Med 2011;155:529-36) | [S] |
+
+## Analysis in R (simulated data)
+
+### Binary test: the standard 2×2 report
+
+```{r binary}
+set.seed(51)
+n <- 500; prev <- 0.30
+dis <- rbinom(n, 1, prev)
+test <- rbinom(n, 1, ifelse(dis == 1, 0.90, 0.15))
+tp <- sum(test & dis); fn <- sum(!test & dis); fp <- sum(test & !dis); tn <- sum(!test & !dis)
+rep_w  <- report_2x2(test, dis, ci = ci_wilson)
+rep_cp <- report_2x2(test, dis, ci = ci_clopper_pearson)
+kable(data.frame(Measure = rep_w$measure, `x/n` = paste0(rep_w$x, "/", rep_w$n),
+                 Estimate = round(100 * rep_w$est, 1),
+                 `Wilson 95% CI` = sprintf("%.1f - %.1f", 100 * rep_w$lower, 100 * rep_w$upper),
+                 `Clopper-Pearson 95% CI` = sprintf("%.1f - %.1f", 100 * rep_cp$lower, 100 * rep_cp$upper),
+                 check.names = FALSE), caption = sprintf("TP %d, FN %d, FP %d, TN %d", tp, fn, fp, tn))
+```
+
+Cross-check against two packages:
+
+```{r xcheck}
+b_w  <- binom.confint(c(tp, tn), c(tp + fn, tn + fp), methods = "wilson")
+b_cp <- binom.confint(c(tp, tn), c(tp + fn, tn + fp), methods = "exact")
+e <- epi.tests(as.table(matrix(c(tp, fp, fn, tn), 2, byrow = TRUE)))$detail
+e <- e[e$statistic %in% c("se", "sp"), ]
+x <- data.frame(measure = c("Se", "Sp"),
+  hand_wilson = rep_w$lower[1:2], binom_wilson = b_w$lower,
+  hand_CP = rep_cp$lower[1:2], binom_exact = b_cp$lower, epiR_exact = e$lower)
+kable(x, digits = 5, caption = "Lower 95% limits from three sources")
+stopifnot(isTRUE(all.equal(x$hand_wilson, x$binom_wilson)),
+          isTRUE(all.equal(x$hand_CP, x$binom_exact)),
+          isTRUE(all.equal(x$hand_CP, x$epiR_exact)))
+```
+
+### PPV and NPV move with prevalence
+
+```{r prev}
+se <- 0.90; sp <- 0.85
+pv <- t(sapply(c(0.01, 0.05, 0.10, 0.30, 0.50), function(p) predictive_values(se, sp, p)))
+kable(data.frame(prevalence = c(0.01, 0.05, 0.10, 0.30, 0.50), round(pv, 3)),
+      caption = "Se 0.90, Sp 0.85. Same test, different populations")
+# check Bayes against a simulated population at 10%
+set.seed(2); N <- 2e6; d_sim <- rbinom(N, 1, .10); t_sim <- rbinom(N, 1, ifelse(d_sim == 1, se, 1 - sp))
+c(sim_PPV = sum(t_sim & d_sim) / sum(t_sim), theory = predictive_values(se, sp, .10)[["PPV"]])
+```
+
+### Paired comparison of two tests on the same patients
+
+```{r paired}
+set.seed(52)
+y1 <- test
+y2 <- rbinom(n, 1, ifelse(dis == 1, 0.80, 0.10))
+dd <- data.frame(d = dis, y1, y2)
+tp_ <- tab.paired(d = d, y1 = y1, y2 = y2, data = dd)
+s <- sesp.mcnemar(tp_)
+# hand McNemar on diseased subjects (no continuity correction in DTComPair; compare)
+n10 <- sum(y1 == 1 & y2 == 0 & dis == 1); n01 <- sum(y1 == 0 & y2 == 1 & dis == 1)
+chi_hand <- (n10 - n01)^2 / (n10 + n01)
+p_base <- mcnemar.test(table(y1[dis == 1], y2[dis == 1]), correct = FALSE)$p.value
+kable(data.frame(source = c("DTComPair", "hand", "base mcnemar.test"),
+                 p_sensitivity_difference = c(s$sensitivity[["p.value"]], pchisq(chi_hand, 1, lower.tail = FALSE), p_base)),
+      digits = 5)
+stopifnot(isTRUE(all.equal(s$sensitivity[["p.value"]], p_base)))
+```
+
+Compare sensitivities only within diseased subjects and specificities within non-diseased, using the **paired** (discordant) counts; an unpaired z-test ignores the correlation. [Y]
+
+### Agreement with a non-reference comparator: why PPA ≠ sensitivity
+
+Truth D is hidden. The comparator C itself errs (Se 0.85, Sp 0.99); the candidate T has true Se 0.92, Sp 0.96.
+
+```{r ppa}
+set.seed(53)
+N <- 200000; D <- rbinom(N, 1, .30)
+C <- rbinom(N, 1, ifelse(D == 1, .85, .01)); cand <- rbinom(N, 1, ifelse(D == 1, .92, .04))
+agr <- report_agreement(cand == 1, C == 1)
+true <- report_2x2(cand == 1, D == 1)
+# discrepant resolution: discordant pairs resolved by the truth, concordant pairs keep the comparator label
+resolved <- ifelse(cand != C, D, C)
+dr <- report_2x2(cand == 1, resolved == 1)
+kable(data.frame(
+  Estimate = c("True sensitivity (unknowable)", "True specificity (unknowable)",
+               "PPA vs comparator", "NPA vs comparator",
+               "'Sensitivity' after discrepant resolution", "'Specificity' after discrepant resolution"),
+  Value = round(c(true$est[1:2], agr$est[1:2], dr$est[1:2]), 4)))
+```
+
+- PPA/NPA are *not* estimates of Se/Sp: the comparator's errors enter. Here PPA (`r sprintf("%.3f", agr$est[1])`) is below the true Se (`r sprintf("%.3f", true$est[1])`) because the comparator's false positives sit in the denominator; NPA (`r sprintf("%.3f", agr$est[2])`) is far below the true Sp (`r sprintf("%.3f", true$est[2])`) because the comparator's false negatives make correct candidate positives count as disagreements. The direction depends on the comparator's error pattern.
+- **Discrepant resolution** resolves only the disagreements, so errors made by *both* tests are never corrected. Here the "sensitivity" rises above the truth (`r sprintf("%.3f vs %.3f", dr$est[1], true$est[1])`) while the "specificity" is almost unchanged (`r sprintf("%.3f vs %.3f", dr$est[2], true$est[2])`): the bias is real but its size depends on the error structure. FDA 2007 discusses discrepant resolution as a source of bias [S]; report the unresolved 2×2 table alongside any resolved one [Y].
+
+### Verification bias and the Begg–Greenes correction
+
+Only positives and 20% of negatives are sent to the reference.
+
+```{r verif}
+set.seed(54)
+N <- 5000; D <- rbinom(N, 1, .30); tv <- rbinom(N, 1, ifelse(D == 1, .90, .15))
+ver <- rbinom(N, 1, ifelse(tv == 1, 1, 0.2))
+naive_se <- sum(tv == 1 & D == 1 & ver == 1) / sum(D == 1 & ver == 1)
+naive_sp <- sum(tv == 0 & D == 0 & ver == 1) / sum(D == 0 & ver == 1)
+# Begg-Greenes: P(D|T) from verified, P(T) from everyone
+pDpos <- mean(D[tv == 1 & ver == 1]); pDneg <- mean(D[tv == 0 & ver == 1]); pT <- mean(tv)
+bg_se <- pDpos * pT / (pDpos * pT + pDneg * (1 - pT))
+bg_sp <- (1 - pDneg) * (1 - pT) / ((1 - pDneg) * (1 - pT) + (1 - pDpos) * pT)
+kable(data.frame(estimate = c("Complete-data truth", "Naive (verified only)", "Begg-Greenes corrected"),
+  Sensitivity = round(c(sum(tv & D) / sum(D), naive_se, bg_se), 3),
+  Specificity = round(c(sum(!tv & !D) / sum(!D), naive_sp, bg_sp), 3)))
+```
+
+Naive sensitivity is inflated, specificity deflated. Correction assumes verification depends only on the test result. [Y]
+
+### ROC, AUC, DeLong CI, paired comparison
+
+```{r roc}
+set.seed(55)
+n1 <- 150; n0 <- 250
+S <- matrix(c(1, .5, .5, 1), 2)
+cases <- mvrnorm(n1, c(1.3, 0.9), S); ctrls <- mvrnorm(n0, c(0, 0), S)
+resp <- rep(c(1, 0), c(n1, n0))
+m1 <- c(cases[, 1], ctrls[, 1]); m2 <- c(cases[, 2], ctrls[, 2])
+r1 <- roc(resp, m1, quiet = TRUE, direction = "<"); r2 <- roc(resp, m2, quiet = TRUE, direction = "<")
+ci1 <- ci.auc(r1, method = "delong")
+h <- auc_delong(cases[, 1], ctrls[, 1])
+kable(data.frame(source = c("pROC (DeLong)", "hand DeLong"),
+  AUC = c(as.numeric(ci1)[2], h[["auc"]]),
+  lower = c(as.numeric(ci1)[1], h[["auc"]] - 1.96 * h[["se"]]),
+  upper = c(as.numeric(ci1)[3], h[["auc"]] + 1.96 * h[["se"]])), digits = 4)
+stopifnot(abs(as.numeric(ci1)[2] - h[["auc"]]) < 1e-10,
+          abs(as.numeric(ci1)[1] - (h[["auc"]] - 1.96 * h[["se"]])) < 1e-3)
+```
+
+```{r roc-fig}
+#| fig-height: 4.2
+roc_figure(list("Marker 1" = r1, "Marker 2" = r2))
+```
+
+```{r roc-test}
+tst <- roc.test(r1, r2, method = "delong", paired = TRUE)
+# independent check: paired bootstrap of the AUC difference
+set.seed(56)
+bd <- replicate(2000, { i <- sample(seq_along(resp), replace = TRUE)
+  while (length(unique(resp[i])) < 2) i <- sample(seq_along(resp), replace = TRUE)
+  auc(roc(resp[i], m1[i], quiet = TRUE, direction = "<")) - auc(roc(resp[i], m2[i], quiet = TRUE, direction = "<")) })
+c(AUC_diff = unname(auc(r1) - auc(r2)), DeLong_p = tst$p.value,
+  boot_CI_lo = unname(quantile(bd, .025)), boot_CI_hi = unname(quantile(bd, .975)))
+```
+
+Partial AUC, specificity region 0.90–1.00 (the clinically relevant corner when false positives are costly):
+
+```{r pauc}
+pa  <- auc(r1, partial.auc = c(1, 0.9), partial.auc.focus = "specificity", partial.auc.correct = FALSE)
+pas <- auc(r1, partial.auc = c(1, 0.9), partial.auc.focus = "specificity", partial.auc.correct = TRUE)
+# hand: trapezoid on the ROC polygon for FPR in [0, 0.1]
+fpr <- 1 - r1$specificities; tpr <- r1$sensitivities
+o <- order(fpr, tpr); fpr <- fpr[o]; tpr <- tpr[o]
+grid <- seq(0, 0.1, length.out = 20001)
+pa_hand <- sum(diff(grid) * (head(approx(fpr, tpr, grid, ties = max)$y, -1) +
+                            tail(approx(fpr, tpr, grid, ties = max)$y, -1)) / 2)
+c(pAUC_pROC = as.numeric(pa), pAUC_hand = pa_hand, standardized_McClish = as.numeric(pas))
+stopifnot(abs(as.numeric(pa) - pa_hand) < 0.003)   # differ in the 3rd decimal: interpolation at the 0.90 boundary
+```
+
+## Sources
+
+Everything tagged [Y] is standard theory, not quoted.
+
+```{r sources-05}
+#| echo: false
+#| results: asis
+show_sources(5, "../claims_ledger.csv")
+```
