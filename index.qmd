@@ -40,7 +40,7 @@ The analyses follow the documents that govern them: CLSI EP guidelines for analy
 | 10 | Reference intervals, longitudinal biomarkers | EP28, ICH E9(R1) |
 | 11 | Combining markers: logistic model, optimism, calibration | TRIPOD |
 | 12 | Time-to-event outcomes and confounding | ICH E9(R1), STROBE |
-| A–C | Mock SAP, SAP template, SAP in a regulated R environment | |
+| A–D | SAP template, mock SAP, SAP in a regulated R environment, computational environment | |
 
 ## Task → governing document → R tools
 
