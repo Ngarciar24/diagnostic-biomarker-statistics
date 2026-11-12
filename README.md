@@ -27,7 +27,7 @@ All data are simulated. The only real figures are public numbers from an FDA 510
 
 ## Results
 
-**A published result, reproduced.** Chapter 6 rebuilds the pivotal 3×2 table of the FDA 510(k) decision summary K261686 (plasma pTau217 vs amyloid PET, N = 958) and recomputes its agreement statistics. The build stops if any value differs from the published one.
+**A published result, reproduced.** Chapter 6 rebuilds the pivotal 3×2 table of the [FDA 510(k) decision summary K261686](https://www.accessdata.fda.gov/cdrh_docs/reviews/K261686.pdf) (plasma pTau217 vs amyloid PET, N = 958) and recomputes its agreement statistics. The build stops if any value differs from the published one.
 
 | Measure (intermediates count as disagreement) | FDA K261686, % (95% CI) | Reproduced, Wilson |
 |---|---|---|
