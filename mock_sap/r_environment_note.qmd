@@ -1,0 +1,36 @@
+---
+title: "One page: a SAP in a regulated R environment"
+engine: knitr
+---
+
+Status: **[Y] synthesis of common practice**, not a standard. Company SOPs override everything here. Nothing below is a quoted regulatory requirement.
+
+| Topic | Practice | In this repo |
+|---|---|---|
+| Environment | Pin R and every package version (`renv.lock`), same container image for the whole study, no upgrades after SAP lock | `renv.lock` |
+| Package validation | Risk-based: base/recommended R, widely used CRAN packages with their own test suites, and *own* functions (full tests). Document intended use and a risk rating per package | cross-checks of package vs hand code in every chapter |
+| Own functions | Written to a specification, unit-tested (`testthat`), tests re-run on every change | `tests/testthat/` (`r length(grep("test_that\\(", unlist(lapply(list.files("../tests/testthat", pattern = "^test-", full.names = TRUE), readLines))))` tests); GitHub Actions runs them on every push |
+| Double programming | Primary endpoints independently programmed by a second person from raw data with a different code path; automated comparison with a tolerance | SAP §12 (agreed to < 1e-10) and `python/check_sap.py` (Python + SQL) |
+| Independent review | Code review of everything else; reviewer different from author | pull requests on GitHub |
+| Script QC checklist | See below | – |
+| Audit trail | Everything in git; tags at SAP lock, data lock and final analysis; file hashes of data and cut-off files; outputs only produced by scripts, never edited by hand | git history; SAP §13 (md5) |
+| Reproducibility | Fixed seeds, `sessionInfo()` logged with each run, no interactive state | seeded simulations; the book is re-rendered from scratch in CI; `sessionInfo()` in the appendix |
+| Versioning and deviations | SAP versioned; post-lock changes via a documented amendment; deviation log | SAP header |
+| Data standards | Raw → ADaM-style analysis datasets → TFLs; raw data read-only | `mock_sap/data/` |
+| SOP references | Programming, QC, data management, change control, archiving: cite the SOP numbers in the SAP | placeholders |
+
+## Script QC checklist (example)
+
+- [ ] Header: purpose, author, date, inputs, outputs, SAP section
+- [ ] Reads only locked inputs; no hard-coded paths or values that belong in a spec
+- [ ] Population flags, cut-offs and boundary conventions match the SAP (**≤ / <** checked)
+- [ ] Every denominator printed; counts reconcile with the flow table
+- [ ] Missing data handled exactly as specified; no silent `na.rm`
+- [ ] Seeds fixed; run twice, identical output
+- [ ] Independent re-derivation of primary endpoints agrees
+- [ ] Output files hashed and logged; `sessionInfo()` saved
+- [ ] Review comments resolved and dated
+
+## Worked example of why double programming pays
+
+While building the mock SAP, the second-programmer re-derivation disagreed with the lead code: the shared helper classified a value *equal to* the upper cut-off as positive (`>=`), while the SAP convention (and the public FDA convention) is positive if **>**. Rounded assay values sit exactly on the cut-off, so the two programmes differed. The helper was fixed and a boundary unit test added.

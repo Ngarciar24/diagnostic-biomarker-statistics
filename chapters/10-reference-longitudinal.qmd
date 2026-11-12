@@ -1,0 +1,174 @@
+---
+title: "Reference intervals and longitudinal biomarkers"
+---
+
+```{r setup}
+#| include: false
+source("../R/helpers.R")
+suppressMessages({library(knitr); library(ggplot2); library(boot); library(refineR); library(lme4); library(nlme)})
+select <- dplyr::select
+```
+
+Tags: **[S]** primary public source, **[Y]** synthesis of standard theory, not a quotation, **[A]** simulation assumption. Data simulated.
+
+## Concept
+
+| Topic | Idea |
+|---|---|
+| Reference interval (RI) | central 95% of a *healthy reference population*: 2.5th and 97.5th percentiles, each with its own CI |
+| Direct method | recruit and test healthy reference individuals (nonparametric percentiles) |
+| Indirect method | mine routine patient data and statistically separate the healthy component (`refineR`) |
+| Partitioning | separate RIs by sex/age if the groups differ enough to matter |
+| Reference change value (RCV) | smallest difference between two serial results in one person that exceeds analytical + biological noise |
+| Monitoring claim | evidence that *changes within a person* are measured reliably and mean something clinically: a **separate intended use** from a one-time diagnostic aid |
+
+## Regulatory anchor
+
+| Item | Verified fact | Tag |
+|---|---|---|
+| EP28 | **EP28-A3c (Ed3), 2010-10-19, reaffirmed 2020-04**: protocol for defining, establishing and verifying reference intervals, incl. subject selection, preanalytical/analytical factors, calculation, transference | [S] clsi.org |
+| Minimum n (the often-quoted 120 per partition) | *not verified: paywalled* | – |
+| IVDR Annex I 9.1(b) | "expected values in normal and affected populations" is among the clinical-performance parameters | [S] |
+| pTau217 label | The Roche 24 Aug 2026 release states the test is not intended as stand-alone and that safety and effectiveness are not established for predicting dementia or **monitoring** effect of therapeutic products; this appears in the release, not in the FDA decision summary text; labelling not seen | [S] ROCHE-0824 |
+| FDA decision summary, cognitively normal reference interval | N = 167 (age 55-80): 95% reference interval 0.0832-0.628 pg/mL; 68.3% ≤ 0.223, 22.8% in 0.223-0.378, 8.98% > 0.378 (FDA-DS p.36; not re-checked against the PDF) | [S] |
+
+## Analysis in R (simulated data)
+
+### 1. Direct reference interval (nonparametric) with CIs
+
+```{r ri}
+set.seed(101)
+n <- 240                                        # assumed >= 120 per partition is typical practice; EP28 text not verified
+x <- rlnorm(n, log(1.0), 0.25)
+np <- quantile(x, c(.025, .975), type = 6)
+# CI 1: bootstrap percentile
+bs <- boot(x, function(d, i) quantile(d[i], c(.025, .975), type = 6), R = 4000)
+ci_boot <- rbind(boot.ci(bs, type = "perc", index = 1)$percent[4:5], boot.ci(bs, type = "perc", index = 2)$percent[4:5])
+# CI 2: distribution-free order-statistic CI (binomial ranks)
+rank_ci <- function(x, p, conf = 0.95) {
+  n <- length(x); s <- sort(x)
+  lo <- qbinom((1 - conf) / 2, n, p); hi <- qbinom(1 - (1 - conf) / 2, n, p) + 1
+  c(s[max(lo, 1)], s[min(hi, n)])
+}
+ci_rank <- rbind(rank_ci(x, .025), rank_ci(x, .975))
+true <- qlnorm(c(.025, .975), log(1), .25)
+kable(data.frame(Limit = c("2.5th", "97.5th"), Estimate = np, `Bootstrap CI` = sprintf("%.3f - %.3f", ci_boot[, 1], ci_boot[, 2]),
+                 `Order-statistic CI` = sprintf("%.3f - %.3f", ci_rank[, 1], ci_rank[, 2]), `True value` = true, check.names = FALSE),
+      digits = 3, row.names = FALSE)
+```
+
+Two independent CI methods agree broadly; the upper-tail CI is much wider than the lower one because the tail is sparse and skewed. With n = 240, each limit rests on about 6 observations. [Y]
+
+**Coverage check of the order-statistic CI** (1000 repeats):
+
+```{r ri-cov}
+set.seed(102)
+cv <- replicate(1000, { z <- rlnorm(n, log(1), .25); r <- rank_ci(z, .975); true[2] >= r[1] && true[2] <= r[2] })
+c(coverage_97.5th = mean(cv))
+```
+
+### 2. Indirect method with `refineR` on mixed routine data
+
+3,000 routine results: 85% from healthy people (lognormal, same as above), 15% pathological with a shifted distribution.
+
+```{r refiner}
+set.seed(103)
+h <- rlnorm(2550, log(1.0), 0.25); p <- rlnorm(450, log(2.0), 0.35); allx <- c(h, p)
+cache <- "../cache/refiner_fit.rds"
+if (file.exists(cache)) fit <- readRDS(cache) else { fit <- findRI(Data = allx, NBootstrap = 30, seed = 1); saveRDS(fit, cache) }
+ri <- getRI(fit, RIperc = c(0.025, 0.975), CIprop = 0.95, pointEst = "fullDataEst")
+kable(data.frame(Method = c("True healthy limits", "Naive percentiles of ALL data", "refineR (indirect)"),
+                 `2.5th` = c(true[1], quantile(allx, .025), ri$PointEst[1]),
+                 `97.5th` = c(true[2], quantile(allx, .975), ri$PointEst[2]), check.names = FALSE), digits = 3)
+```
+
+The naive upper limit is inflated by the pathological component; `refineR` recovers the healthy limits. It assumes the healthy component is (Box-Cox) normal and dominant; it replaces recruitment but does not replace judgement on population and preanalytics, and I make no claim that a regulator accepts it in place of EP28-style direct studies. [Y]
+
+### 3. Reference change value from a mixed model
+
+Log-scale model: `log y = subject mean + noise`. Analytical CV 4%, biological within-subject CV 8% [A], 150 stable subjects, 4 samples each.
+
+```{r rcv}
+set.seed(104)
+ns <- 150; k <- 4
+sd_b <- 0.30; sd_w <- sqrt(0.04^2 + 0.08^2)                        # log scale approximations of CVs
+dd <- data.frame(id = rep(seq_len(ns), each = k))
+dd$ly <- rnorm(ns, 0, sd_b)[dd$id] + rnorm(nrow(dd), 0, sd_w)
+m <- lmer(ly ~ 1 + (1 | id), dd)
+vc <- as.data.frame(VarCorr(m)); s_w <- sqrt(vc$vcov[vc$grp == "Residual"])
+z <- qnorm(0.975)
+rcv_model <- c(down = exp(-z * sqrt(2) * s_w) - 1, up = exp(z * sqrt(2) * s_w) - 1)
+# second way: SD of paired differences of consecutive results
+dif <- unlist(tapply(dd$ly, dd$id, function(v) diff(v)))
+rcv_pairs <- c(down = exp(-z * sd(dif)) - 1, up = exp(z * sd(dif)) - 1)
+# third: truth
+rcv_true <- c(down = exp(-z * sqrt(2) * sd_w) - 1, up = exp(z * sqrt(2) * sd_w) - 1)
+kable(rbind(`lmer within-subject SD` = rcv_model, `SD of paired differences` = rcv_pairs, `true (simulation)` = rcv_true) * 100,
+      digits = 1, caption = "RCV (% change), two-sided 95%: RCV = exp(+-1.96 sqrt(2) SD_within) - 1")
+# false-flag rate in stable people
+nw <- 20000; a <- rnorm(nw, 0, sd_w); b <- rnorm(nw, 0, sd_w)
+c(false_flag_rate = mean(b - a > log(1 + rcv_true["up"]) | b - a < log(1 + rcv_true["down"])))
+```
+
+The log-scale formula gives a slightly asymmetric interval (about −22% / +28% here). Detection of a *true* change: [Y]
+
+```{r rcv-power}
+set.seed(105)
+sapply(c(0.20, 0.50, 1.00), function(ch) mean(rnorm(nw, log(1 + ch), sqrt(2) * sd_w) > log(1 + rcv_true["up"])))
+```
+
+(true increase of 20%, 50%, 100%: about 31%, 89% and 100% of individuals flagged). A genuine 20% rise is missed about two times in three: the RCV suits detection of large changes, not subtle ones. [Y]
+
+### 4. Trajectory modelling: MMRM versus completers
+
+Two-arm trial; change from baseline at months 6 and 12; unstructured covariance; control declines 1.0/2.0, drug 0.7/1.4 (true effect 0.6 at month 12); SD 2, correlation 0.6 [A].
+
+```{r mmrm}
+set.seed(106)
+nper <- 150
+sim_mmrm <- function(dropout = FALSE) {
+  trt <- rep(0:1, each = nper); id <- seq_along(trt)
+  S <- matrix(c(4, 2.4, 2.4, 4), 2)
+  mu <- cbind(-1.0 + 0.3 * trt, -2.0 + 0.6 * trt)
+  y <- mu + MASS::mvrnorm(length(trt), c(0, 0), S)
+  miss12 <- if (dropout) rbinom(length(trt), 1, plogis(-1.2 - 0.9 * y[, 1] - 0.6 * trt)) == 1 else rep(FALSE, length(trt))
+  data.frame(id = rep(id, 2), trt = rep(trt, 2), visit = factor(rep(c("6", "12"), each = length(trt)), levels = c("6", "12")),
+             vnum = rep(1:2, each = length(trt)), chg = c(y[, 1], ifelse(miss12, NA, y[, 2])))
+}
+fit_mmrm <- function(d) {
+  d <- d[order(d$id, d$vnum), ]; d <- d[!is.na(d$chg), ]
+  f <- gls(chg ~ trt * visit, data = d, correlation = corSymm(form = ~ vnum | id), weights = varIdent(form = ~ 1 | visit),
+           na.action = na.omit)
+  b <- coef(f); c(`month 6` = b[["trt"]], `month 12` = b[["trt"]] + b[["trt:visit12"]])
+}
+d0 <- sim_mmrm(FALSE)
+t12 <- with(d0[d0$visit == "12", ], mean(chg[trt == 1]) - mean(chg[trt == 0]))
+kable(data.frame(Estimate = c("MMRM, complete data", "t-test difference, complete data"),
+                 `Month 12 effect` = c(fit_mmrm(d0)[["month 12"]], t12)), digits = 4)
+stopifnot(abs(fit_mmrm(d0)[["month 12"]] - t12) < 1e-6)
+```
+
+With balanced complete data, unstructured-covariance MMRM equals the per-visit mean difference (exact check above). With dropout related to earlier worsening (MAR), MMRM uses the month-6 data of dropouts; completers do not:
+
+```{r mmrm-drop}
+R <- 200
+res <- t(replicate(R, { d <- sim_mmrm(TRUE)
+  cc <- d[d$visit == "12" & !is.na(d$chg), ]
+  c(MMRM = fit_mmrm(d)[["month 12"]], completers = mean(cc$chg[cc$trt == 1]) - mean(cc$chg[cc$trt == 0])) }))
+kable(data.frame(Estimator = colnames(res), `Mean estimate (truth 0.6)` = colMeans(res), `Bias` = colMeans(res) - 0.6,
+                 SD = apply(res, 2, sd), check.names = FALSE), digits = 3, row.names = FALSE)
+```
+
+### Why "monitoring" is a separate intended use [Y]
+
+A diagnostic aid shows a result *discriminates* amyloid-positive from negative at one time. A monitoring claim needs: within-person precision and RCV in the target population (above), evidence the marker *changes* with treatment or disease course (responsiveness), evidence that changes relate to clinical or imaging change, stability of the assay over time and lots, and a defined action rule. None follows from AUC, which is consistent with the manufacturer's release stating that effectiveness for monitoring is not established.
+
+## Sources
+
+RCV and MMRM results are simulation-based synthesis.
+
+```{r sources-10}
+#| echo: false
+#| results: asis
+show_sources(10, "../claims_ledger.csv")
+```

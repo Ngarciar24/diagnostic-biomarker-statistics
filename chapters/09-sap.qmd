@@ -1,0 +1,61 @@
+---
+title: "The statistical analysis plan for a diagnostic clinical performance study"
+---
+
+```{r setup}
+#| include: false
+library(knitr)
+source("../R/helpers.R")
+```
+
+Tags: **[S]** primary public source, **[Y]** synthesis of standard theory, not a quotation. The worked example is in `mock_sap/` (also appended to this book).
+
+## Concept
+
+A SAP fixes, **before** the reference-standard data are seen, who is analysed, what is estimated, how, and what counts as success. In a diagnostic performance study the high-risk choices are:
+
+| Decision | Why it matters |
+|---|---|
+| Reference standard, timing, blinding | defines "truth"; imperfect or late reference biases accuracy |
+| Cut-offs locked, boundary convention | tuning on the study data inflates performance; `≤` versus `<` changes counts |
+| Indeterminate results | counted as misses, excluded, or separate category changes every headline number |
+| Performance goals and success rule | defines success without post hoc argument |
+| Population for the primary analysis | the diagnostic analogue of ITT: evaluable subjects with valid index and reference |
+| Subgroups (age, sex, kidney function, cognition, setting) | pre-specified, descriptive |
+| Missing/invalid handling and sensitivity analyses | shows robustness, e.g. worst case for invalid assay results |
+
+## Regulatory anchor
+
+| Source | What it gives | Tag |
+|---|---|---|
+| IVDR Annex XIII Part A 2.3.2 | clinical performance study plan items include statistical design and bias minimisation (j), clinical performance parameters and primary/secondary endpoints (l), population size and representativity (m), "assurance of relevant method for determining the true clinical status" (n) | [S] |
+| IVDR Annex XIII Part A 1.1 | the performance evaluation plan includes "the appropriate statistical tools" and potential acceptance criteria | [S] |
+| ISO 20916:2019 | good study practice for planning, design, conduct, recording and reporting of clinical performance studies using specimens from human subjects, for regulatory purposes; analytical studies out of scope (full text paywalled; abstract read) | [S] |
+| MDCG 2022-2 (Jan 2022) | general principles of clinical evidence for IVDs; sections on performance evaluation plan, clinical performance studies and the report | [S] |
+| ICH E9 (1998), E9(R1) (2019) | drug-trial statistical principles and estimands; used by analogy, no IVD authority verified to mandate them | [S]/[Y] |
+| CDISC | SDTMIG for Medical Devices v1.1 (2019); ADaMIG for Medical Devices v1.0 (2021). No IVD-specific standard found | [S] cdisc.org |
+| STARD 2015 | reporting checklist, 30 items | [S] |
+| FDA 2007 statistical guidance | PPA/NPA language; discrepant-resolution caution | [S] |
+
+## Worked example: the mock SAP
+
+All files are in `mock_sap/`:
+
+| File | Purpose |
+|---|---|
+| `sap_template.qmd` | blank SAP with prompts for each section |
+| `sap_ptau217_mock.qmd` | filled for simulated study SIM-217-001: co-primary PPV and NPV with performance goals, key secondary sensitivity/specificity, locked two cut-offs, populations, methods, sample size (exact, cross-checked), missing-data handling, subgroups incl. eGFR, sensitivity analyses, table shells **filled with simulated results**, double-programming check, audit hashes |
+| `simulate_study.R` | generates the derivation cohort, the locked cut-offs and the study data |
+| `r_environment_note.qmd` | one page on a SAP in a regulated R environment |
+
+What the dry run shows [Y]: both co-primaries are met on simulated data, the headline PPA/NPA are ≈ 74%/72% because intermediates count as disagreement, subgroup tables suppress cells with n < 20, and a second-programmer re-derivation reproduced the primary endpoints exactly **after** it exposed a real boundary-convention bug in the lead code. The Python pipeline in `python/` repeats the primary endpoints a third time, from the raw CSV through SQL, outside R.
+
+## Sources
+
+The R-environment practices are synthesis, not sourced claims.
+
+```{r sources-09}
+#| echo: false
+#| results: asis
+show_sources(9, "../claims_ledger.csv")
+```

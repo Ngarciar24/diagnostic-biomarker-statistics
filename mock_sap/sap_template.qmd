@@ -1,0 +1,59 @@
+---
+title: "SAP template: diagnostic clinical performance study"
+subtitle: "Blank structure with prompts. Fill each section; delete prompts."
+---
+
+Structure borrowed from ICH E9 (by analogy) and adapted to IVDR Annex XIII Part A 2.3.2 and ISO 20916:2019. See `sap_ptau217_mock.qmd` for a filled example.
+
+| Field | Entry |
+|---|---|
+| Document ID / version / date | |
+| Protocol / CPSP reference | |
+| Author, independent reviewer, approver | |
+| Applicable SOPs | |
+| Version history and lock date (before unblinding of reference-standard data) | |
+
+## 1. Objectives and hypotheses
+- Intended use and intended-use population (as in labelling).
+- Primary objective; each primary endpoint with a **performance goal** and a pre-specified success rule.
+- Secondary and exploratory objectives.
+
+## 2. Design, reference standard, cut-offs
+- Design (prospective, banked, case-control; sites; settings).
+- **Reference standard**: definition, readers/adjudication, blinding both ways, timing window, handling of unreadable results.
+- **Cut-offs**: how and where derived, lock date and file, rule for indeterminate results, convention at the boundary (≤ vs <).
+
+## 3. Analysis populations
+- Enrolled, **evaluable (primary)**, per-protocol. State the diagnostic analogue of ITT: who is in, who is out, why.
+
+## 4. Endpoints and statistical methods
+- Each endpoint: definition, numerator/denominator, CI method (Wilson, exact, other), software function.
+- Treatment of indeterminates: separate category, counted as non-agreement, excluded in a sensitivity analysis.
+- Prevalence dependence of predictive values.
+- Agreement metrics when the comparator is not a reference standard: PPA/NPA/OPA (FDA 2007).
+
+## 5. Sample size
+- Assumed expected performance, goals, alpha, power, category frequencies, loss to non-evaluable; method and cross-check.
+
+## 6. Missing, invalid and unreadable results
+- Repeat rules, exclusion rules, flow diagram (STARD), worst-case and imputation sensitivity analyses.
+
+## 7. Subgroups
+- List (age, sex, kidney function, cognitive status, setting, other), minimum n for reporting, descriptive vs inferential.
+
+## 8. Multiplicity, interim analyses, sensitivity analyses
+- Co-primary rule, hierarchy, adjustments; interim analyses (if any) and who sees what; sensitivity analyses list.
+
+## 9. Data standards
+- Datasets (SDTM/ADaM-style by analogy; CDISC device implementation guides exist), derivations, controlled terminology.
+
+## 10. Software, validation and QC
+- R version, `renv.lock`, validated functions and tests; double programming of primary endpoints; QC checklist.
+
+## 11. Tables, figures, listings (shells)
+- Disposition, baseline, 3×2 table, primary, secondary, subgroups, sensitivity, listings of discordant cases.
+
+## 12. Deviations and amendments
+- How deviations are recorded; amendment procedure after lock.
+
+## References

@@ -1,0 +1,278 @@
+---
+title: "Statistical Analysis Plan (mock): clinical performance study SIM-217-001"
+subtitle: "Two-cut-off plasma pTau217-like test vs amyloid PET. Simulated data only."
+---
+
+```{r setup}
+#| include: false
+source("../R/helpers.R")
+suppressMessages({library(knitr); library(binom)})
+dat <- read.csv("data/sim_ptau217.csv", stringsAsFactors = FALSE)
+cut <- read.csv("data/locked_cutoffs.csv")
+LO <- cut$pg_per_ml[cut$cutoff == "rule_out_le"]; HI <- cut$pg_per_ml[cut$cutoff == "rule_in_gt"]
+pct <- function(v) sprintf("%.1f (%.1f-%.1f)", 100 * v[["est"]], 100 * v[["lower"]], 100 * v[["upper"]])
+```
+
+> **Status of this document.** A *teaching* SAP. The study, device, data and numbers are simulated; the structure follows ICH E9 by analogy and the content items of IVDR Annex XIII Part A 2.3.2 (statistical design, endpoints, population size, method for determining true clinical status). No claim is made that a regulator accepts this plan. Tags: **[S]** public source, **[A]** assumption, **[Y]** synthesis.
+
+| Field | Entry |
+|---|---|
+| Document ID / version | SAP-SIM217-001 v1.0 (DRAFT) |
+| Protocol reference | CPSP-SIM217-001 (placeholder) |
+| Author / independent reviewer / approver | *names and dates: placeholders* |
+| Applicable SOPs | SOP-STAT-xxx (programming), SOP-QC-xxx (QC), SOP-DM-xxx (data management): placeholders |
+| Version history | v0.1 outline; v1.0 locked before unblinding of reference-standard data |
+
+## 1. Objectives and hypotheses
+
+**Intended use (simulated).** Aid in identifying amyloid pathology in adults aged 55 years and older with signs, symptoms or complaints of cognitive decline; used with other clinical information; not stand-alone; not for monitoring. [A]
+
+**Primary objective.** Show that a *positive* result carries a high probability of amyloid-PET positivity and a *negative* result a low one.
+
+| Co-primary endpoint | Performance goal (H0) | Expected value | Success rule |
+|---|---|---|---|
+| P1: PPV of the positive category | PPV ≤ 0.75 | 0.88 [A] | lower limit of two-sided 95% Wilson CI > 0.75 |
+| P2: NPV of the negative category | NPV ≤ 0.90 | 0.95 [A] | lower limit of two-sided 95% Wilson CI > 0.90 |
+
+Success requires **both** (intersection-union): no alpha adjustment is needed because each test is run at the one-sided 0.025 level and both must reject. [Y]
+
+**Why predictive values as co-primaries, and what that costs.** The intended use is a decision on an individual result ("this positive result means amyloid is likely present"), so PPV and NPV state the claim directly. Unlike sensitivity and specificity they depend on the prevalence in the enrolled population, so success depends on enrolling the intended-use mix: enrolment is stratified by care setting to match the planned 25% primary / 75% secondary care split, the observed prevalence is reported with its CI, and PPV/NPV at other prevalences are shown by Bayes' rule from the step-wise sensitivity and specificity. Those prevalence-free quantities are **key secondary endpoints** with descriptive goals: rule-out step sensitivity ≥ 0.90 and rule-in step specificity ≥ 0.85 (lower 95% limits). [Y]
+
+**Secondary objectives.** Rule-out step sensitivity and rule-in step specificity (key secondary, above); intermediate-zone fraction; PPA and NPA with intermediates counted as non-agreement; PPV/NPV of each category with likelihood ratios; performance by pre-specified subgroups.
+
+## 2. Design, reference standard and cut-offs
+
+- **Design.** Prospective-retrospective, banked K2-EDTA plasma, multi-site, primary and secondary care. [A]
+- **Reference standard.** Amyloid PET visual read by a blinded reader panel (≥ 3 readers, majority rule; unreadable scan = missing). The interval between blood draw and PET is recorded; per-protocol requires ≤ 180 days. Readers are blind to the index test; index-test operators are blind to PET. [A]
+- **Cut-offs (locked).** Derived on a *separate* simulated derivation cohort (n = 700) by `derive_two_cutoffs()` with targets sensitivity ≥ 94% (rule-out) and specificity ≥ 93% (rule-in); stored in `data/locked_cutoffs.csv` and **not re-estimated on performance-study data**. Convention as in the public decision summary [S]: negative if ≤ lower cut-off, positive if > upper cut-off.
+
+```{r locked}
+kable(data.frame(Category = c("Negative (rule-out)", "Intermediate", "Positive (rule-in)"),
+                 `Rule (pg/mL)` = c(sprintf("<= %.3f", LO), sprintf("> %.3f to <= %.3f", LO, HI), sprintf("> %.3f", HI)),
+                 check.names = FALSE))
+```
+
+## 3. Analysis populations
+
+| Population | Definition | Role |
+|---|---|---|
+| Enrolled | all subjects with a plasma sample | disposition |
+| **Evaluable (primary)** | valid assay result **and** readable PET | primary analysis, the diagnostic analogue of the ITT/full-analysis set [Y] |
+| Per-protocol | evaluable, PET interval ≤ 180 days, no major deviation | sensitivity analysis |
+
+## 4. Endpoints and statistical methods
+
+- Proportions: **Wilson** 95% CIs (primary); Clopper–Pearson as sensitivity. PPV = positive-category subjects with PET+ / all positive-category subjects; NPV analogously. Both are conditional on category and **prevalence-dependent**; observed prevalence reported with CI.
+- Likelihood ratios per category with log-scale 95% CI (asymptotic, ratio of two proportions).
+- PPA = (positive result among PET+); NPA = (negative result among PET−); **intermediates count as non-agreement** (as in the public decision summary [S]). Rule-out step sensitivity and rule-in step specificity as additional descriptors.
+- No imputation of PET. Subgroup CIs are descriptive; interaction tests are exploratory and not used for claims.
+
+## 5. Sample size
+
+Planning assumptions [A]: positive-category frequency 0.336 and negative-category frequency 0.465, taken from the *public pivotal data of a comparable cleared test* (FDA K261686, p.27 [S]) and used here only as planning inputs; 8% loss to non-evaluable.
+
+```{r ssize}
+n_pos <- n_exact_goal_stable(0.88, 0.75, alpha = 0.025, power = 0.90)   # subjects with a positive result
+n_neg <- n_exact_goal_stable(0.95, 0.90, alpha = 0.025, power = 0.90)   # subjects with a negative result
+N_pos <- ceiling(n_pos / 0.336); N_neg <- ceiling(n_neg / 0.465)
+N_eval <- max(N_pos, N_neg); N_enr <- ceiling(N_eval / 0.92)
+kable(data.frame(Endpoint = c("P1 PPV (exact one-sided 0.025, power 0.90)", "P2 NPV (exact one-sided 0.025, power 0.90)"),
+                 `Subjects needed in category` = c(n_pos, n_neg), `Evaluable subjects needed` = c(N_pos, N_neg),
+                 check.names = FALSE))
+c(evaluable_required = N_eval, enrolled_required = N_enr, planned_enrolled = nrow(dat))
+```
+
+Joint power of the two co-primaries is approximately the product of the individual powers when the two are nearly independent (≈ 0.81 for 0.90 each) [Y]. The calculation above also treats the number of subjects in each category as fixed, while in the study it is random. The simulation below draws the category counts from a multinomial with the planning frequencies, then the PET status within each category, and applies the success rule, at the planned N. Cross-check method: the exact calculation matches `MKmisc::power.diagnostic.test` (Chapter 7, tested).
+
+```{r ssize-sim}
+set.seed(2170)
+n_ev_planned <- floor(nrow(dat) * 0.92)
+succ <- replicate(5000, {
+  k <- rmultinom(1, n_ev_planned, c(0.336, 1 - 0.336 - 0.465, 0.465))   # positive, intermediate, negative
+  xp <- rbinom(1, k[1], 0.88); xn <- rbinom(1, k[3], 0.95)
+  c(p1 = ci_wilson(xp, k[1])[["lower"]] > 0.75, p2 = ci_wilson(xn, k[3])[["lower"]] > 0.90)
+})
+c(evaluable_planned = n_ev_planned, power_P1 = mean(succ["p1", ]), power_P2 = mean(succ["p2", ]),
+  joint_power = mean(succ["p1", ] & succ["p2", ]))
+```
+
+## 6. Missing, invalid and unreadable results
+
+- Invalid assay results are repeated once per the instructions for use (not simulated); results still invalid are excluded from the evaluable set and reported in the flow table.
+- Unreadable PET = missing reference; excluded from evaluable. **Sensitivity analysis S2** (worst case): invalid assay results among PET+ are counted as negative, among PET− as positive.
+- A STARD flow diagram (Table 1) documents all exclusions. [S: STARD 2015 has 30 items]
+
+## 7. Subgroups (descriptive)
+
+Age (55–70, 71–85), sex, care setting (primary, secondary), MMSE (15–24, 25–27, 28–30), **kidney function by eGFR (< 30, 30–59, ≥ 60)**, with a minimum of 20 subjects per category for a CI to be reported. Kidney function is pre-specified because the public decision summary of the comparable test contains no eGFR-stratified analysis (only a small kidney-disease comorbidity subgroup) [S].
+
+## 8. Multiplicity, interim analyses, sensitivity analyses
+
+- Co-primary success rule above; secondary and subgroup results are not adjusted and are labelled descriptive. No interim analysis (fixed sample).
+- S1 per-protocol; S2 worst-case for invalid assay results; S3 Clopper–Pearson intervals.
+
+## 9. Data standards
+
+CDISC publishes **SDTMIG for Medical Devices (v1.1, 2019)** and **ADaMIG for Medical Devices (v1.0, 2021)** [S: cdisc.org]; no IVD-specific CDISC standard was found, and nothing verified says CDISC is required for IVDR submissions. This mock uses ADaM-style analysis datasets (subject-level ADSL, performance ADPERF) *by analogy*, with variable names and derivation notes in the programming specification. [Y]
+
+## 10. Software and quality control
+
+Software, validation and QC are in the companion note *SAP in a regulated R environment*. The primary endpoints are **double-programmed**; the QC comparison is executed below.
+
+## 11. Table shells and dry run on simulated data
+
+```{r derive}
+d <- dat
+d$assay_valid <- !is.na(d$PTAU217); d$pet_valid <- !is.na(d$PET_VISUAL)
+d$EVAL <- d$assay_valid & d$pet_valid
+d$CAT <- ifelse(d$EVAL, as.character(classify_two_cut(d$PTAU217, LO, HI)), NA)
+d$CAT <- factor(d$CAT, levels = c("rule-out", "intermediate", "rule-in"))
+ev <- d[d$EVAL, ]
+```
+
+**Table 1. Disposition (STARD flow).**
+
+```{r t1}
+kable(data.frame(Step = c("Enrolled", "Valid assay result", "Readable PET", "Evaluable (primary set)", "Per-protocol subset"),
+                 N = c(nrow(d), sum(d$assay_valid), sum(d$pet_valid), sum(d$EVAL), sum(d$EVAL & d$PPFL == "Y"))))
+```
+
+**Table 2. Baseline characteristics of the evaluable set by PET status.**
+
+```{r t2}
+b <- function(f) c(f(ev[ev$PET_VISUAL == 0, ]), f(ev[ev$PET_VISUAL == 1, ]), f(ev))
+kable(data.frame(Characteristic = c("n", "Age, mean (SD)", "Female, n (%)", "Primary care, n (%)", "MMSE, mean (SD)", "eGFR < 60, n (%)"),
+  `PET-` = c(sum(ev$PET_VISUAL == 0), sprintf("%.1f (%.1f)", mean(ev$AGE[ev$PET_VISUAL == 0]), sd(ev$AGE[ev$PET_VISUAL == 0])),
+             sprintf("%d (%.0f)", sum(ev$SEX[ev$PET_VISUAL == 0] == "F"), 100 * mean(ev$SEX[ev$PET_VISUAL == 0] == "F")),
+             sprintf("%d (%.0f)", sum(ev$SETTING[ev$PET_VISUAL == 0] == "primary"), 100 * mean(ev$SETTING[ev$PET_VISUAL == 0] == "primary")),
+             sprintf("%.1f (%.1f)", mean(ev$MMSE[ev$PET_VISUAL == 0]), sd(ev$MMSE[ev$PET_VISUAL == 0])),
+             sprintf("%d (%.0f)", sum(ev$EGFR[ev$PET_VISUAL == 0] < 60), 100 * mean(ev$EGFR[ev$PET_VISUAL == 0] < 60))),
+  `PET+` = c(sum(ev$PET_VISUAL == 1), sprintf("%.1f (%.1f)", mean(ev$AGE[ev$PET_VISUAL == 1]), sd(ev$AGE[ev$PET_VISUAL == 1])),
+             sprintf("%d (%.0f)", sum(ev$SEX[ev$PET_VISUAL == 1] == "F"), 100 * mean(ev$SEX[ev$PET_VISUAL == 1] == "F")),
+             sprintf("%d (%.0f)", sum(ev$SETTING[ev$PET_VISUAL == 1] == "primary"), 100 * mean(ev$SETTING[ev$PET_VISUAL == 1] == "primary")),
+             sprintf("%.1f (%.1f)", mean(ev$MMSE[ev$PET_VISUAL == 1]), sd(ev$MMSE[ev$PET_VISUAL == 1])),
+             sprintf("%d (%.0f)", sum(ev$EGFR[ev$PET_VISUAL == 1] < 60), 100 * mean(ev$EGFR[ev$PET_VISUAL == 1] < 60))),
+  check.names = FALSE))
+```
+
+**Table 3. Result category by amyloid PET.**
+
+```{r t3}
+t3 <- table(ev$CAT, ev$PET_VISUAL); colnames(t3) <- c("PET-", "PET+")
+kable(addmargins(t3))
+```
+
+**Table 4. Primary endpoints and decision.**
+
+```{r t4}
+pp <- two_cut_performance(ev$PTAU217, ev$PET_VISUAL, LO, HI)
+ppv <- pp$rulein_ppv; npv <- pp$ruleout_npv
+kable(data.frame(
+  Endpoint = c("P1 PPV positive", "P2 NPV negative"),
+  `n/N` = c(sprintf("%d/%d", t3["rule-in", "PET+"], sum(t3["rule-in", ])), sprintf("%d/%d", t3["rule-out", "PET-"], sum(t3["rule-out", ]))),
+  `Estimate % (95% Wilson CI)` = c(pct(ppv), pct(npv)),
+  Goal = c("> 75%", "> 90%"),
+  Met = c(ppv[["lower"]] > 0.75, npv[["lower"]] > 0.90), check.names = FALSE))
+cat("Study success (both co-primaries met):", ppv[["lower"]] > 0.75 && npv[["lower"]] > 0.90, "\n")
+```
+
+**Table 5. Secondary endpoints.**
+
+```{r t5}
+lr <- function(cat) {
+  n1 <- sum(ev$PET_VISUAL == 1); n0 <- sum(ev$PET_VISUAL == 0)
+  a <- sum(ev$CAT == cat & ev$PET_VISUAL == 1); b0 <- sum(ev$CAT == cat & ev$PET_VISUAL == 0)
+  p1 <- a / n1; p0 <- b0 / n0; est <- p1 / p0
+  se <- sqrt((1 - p1) / (n1 * p1) + (1 - p0) / (n0 * p0))
+  sprintf("%.2f (%.2f-%.2f)", est, exp(log(est) - 1.96 * se), exp(log(est) + 1.96 * se))
+}
+kable(data.frame(
+  Endpoint = c("Intermediate fraction", "PPA (positive among PET+; intermediates = disagreement)", "NPA (negative among PET-)",
+               "Rule-out step sensitivity (not-negative among PET+)", "Rule-in step specificity (not-positive among PET-)",
+               "LR positive category", "LR intermediate", "LR negative category"),
+  `Estimate % (95% CI)` = c(pct(pp$intermediate), pct(pp$ppa_incl), pct(pp$npa_incl), pct(pp$ruleout_sens), pct(pp$rulein_spec),
+                            lr("rule-in"), lr("intermediate"), lr("rule-out")),
+  `Descriptive goal` = c("", "", "", "lower limit >= 90%", "lower limit >= 85%", "", "", ""), check.names = FALSE))
+```
+
+**Table 6. Subgroups (descriptive; n < 20 in a category suppressed).**
+
+```{r t6}
+sg <- function(var, label) do.call(rbind, lapply(sort(unique(as.character(ev[[var]]))), function(l) {
+  v <- ev[as.character(ev[[var]]) == l, ]; q <- two_cut_performance(v$PTAU217, v$PET_VISUAL, LO, HI)
+  np <- sum(v$CAT == "rule-in"); nn <- sum(v$CAT == "rule-out")
+  data.frame(Subgroup = paste(label, l), N = nrow(v), `Intermediate %` = pct(q$intermediate),
+    `PPV positive %` = if (np >= 20) pct(q$rulein_ppv) else "n<20", `NPV negative %` = if (nn >= 20) pct(q$ruleout_npv) else "n<20",
+    check.names = FALSE) }))
+kable(rbind(sg("AGEGR", "Age"), sg("SEX", "Sex"), sg("SETTING", "Setting"), sg("MMSEGR", "MMSE"), sg("EGFRGR", "eGFR")), row.names = FALSE)
+```
+
+**Table 7. Sensitivity analyses.**
+
+```{r t7}
+pps <- ev[ev$PPFL == "Y", ]; q_pp <- two_cut_performance(pps$PTAU217, pps$PET_VISUAL, LO, HI)
+# S2 worst case: invalid assay among PET+ -> negative, among PET- -> positive
+inv <- d[!d$assay_valid & d$pet_valid, ]
+pos_w <- t3["rule-in", "PET+"]; pos_n <- sum(t3["rule-in", ]) + sum(inv$PET_VISUAL == 0)
+neg_ok <- t3["rule-out", "PET-"]; neg_n <- sum(t3["rule-out", ]) + sum(inv$PET_VISUAL == 1)
+cpf <- function(x, n) pct(ci_clopper_pearson(x, n))
+cp_ppv <- cpf(t3["rule-in", "PET+"], sum(t3["rule-in", ])); cp_npv <- cpf(t3["rule-out", "PET-"], sum(t3["rule-out", ]))
+kable(data.frame(
+  Analysis = c("S1 per-protocol: PPV", "S1 per-protocol: NPV", "S2 worst case invalid assay: PPV", "S2 worst case invalid assay: NPV",
+               "S3 Clopper-Pearson: PPV", "S3 Clopper-Pearson: NPV"),
+  `Estimate % (95% CI)` = c(pct(q_pp$rulein_ppv), pct(q_pp$ruleout_npv),
+    pct(ci_wilson(sum(pos_w), pos_n)), pct(ci_wilson(neg_ok, neg_n)), cp_ppv, cp_npv), check.names = FALSE))
+```
+
+## 12. Double programming: independent QC comparison
+
+A second programmer re-derives the primary endpoints from the raw CSV and the locked cut-off file **without** using the project helpers or any object created above (different packages, different code path); the lead programmer's results must agree. In a real study the second programmer works separately, from the SAP and the specification only; here both programmes sit in one document so the comparison is visible. A third, cross-language re-derivation runs in Python and SQL (`python/`), outside R.
+
+```{r qc}
+# Evaluated in an environment whose parent is the package search path, not the global
+# environment: LO, HI, d, ev and the helpers are not visible to the second programme.
+indep <- local({
+  raw <- read.csv("data/sim_ptau217.csv"); raw <- raw[!is.na(raw$PTAU217) & !is.na(raw$PET_VISUAL), ]
+  co <- read.csv("data/locked_cutoffs.csv")
+  lo <- co$pg_per_ml[co$cutoff == "rule_out_le"]; hi <- co$pg_per_ml[co$cutoff == "rule_in_gt"]
+  neg <- raw$PTAU217 <= lo; pos <- raw$PTAU217 > hi
+  list(ppv = binom::binom.confint(sum(pos & raw$PET_VISUAL == 1), sum(pos), methods = "wilson"),
+       npv = binom::binom.confint(sum(neg & raw$PET_VISUAL == 0), sum(neg), methods = "wilson"))
+}, envir = new.env(parent = parent.env(globalenv())))
+w_ppv <- indep$ppv; w_npv <- indep$npv
+qc <- data.frame(item = c("PPV est", "PPV lower", "NPV est", "NPV lower"),
+  lead = c(ppv[["est"]], ppv[["lower"]], npv[["est"]], npv[["lower"]]),
+  independent = c(w_ppv$mean, w_ppv$lower, w_npv$mean, w_npv$lower))
+qc$difference <- qc$lead - qc$independent
+kable(qc, digits = 10)
+stopifnot(all(abs(qc$difference) < 1e-10))
+```
+
+## 13. Audit trail
+
+```{r audit}
+data.frame(file = c("data/sim_ptau217.csv", "data/locked_cutoffs.csv"),
+           md5 = unname(tools::md5sum(c("data/sim_ptau217.csv", "data/locked_cutoffs.csv"))))
+```
+
+The cut-off file hash is recorded before the performance data are analysed; any later change is a deviation and must be documented. [Y]
+
+## Export for the cross-language check
+
+```{r export}
+dir.create("../outputs", showWarnings = FALSE)
+write.csv(data.frame(
+  endpoint = c("ppv_positive", "npv_negative", "ppa_incl", "npa_incl", "intermediate_fraction"),
+  x = c(t3["rule-in", "PET+"], t3["rule-out", "PET-"], t3["rule-in", "PET+"], t3["rule-out", "PET-"], sum(t3["intermediate", ])),
+  n = c(sum(t3["rule-in", ]), sum(t3["rule-out", ]), sum(t3[, "PET+"]), sum(t3[, "PET-"]), sum(t3)),
+  est = c(ppv[["est"]], npv[["est"]], pp$ppa_incl[["est"]], pp$npa_incl[["est"]], pp$intermediate[["est"]]),
+  lower = c(ppv[["lower"]], npv[["lower"]], pp$ppa_incl[["lower"]], pp$npa_incl[["lower"]], pp$intermediate[["lower"]]),
+  upper = c(ppv[["upper"]], npv[["upper"]], pp$ppa_incl[["upper"]], pp$npa_incl[["upper"]], pp$intermediate[["upper"]])),
+  "../outputs/sap_primary_endpoints.csv", row.names = FALSE)
+```
+
+`python/check_sap.py` recomputes this table from the raw CSV with SQL and plain Python and fails the build if any value differs.
+
+## References
+
+IVDR (EU) 2017/746 Annex XIII Part A 2.3.2; ISO 20916:2019; ICH E9 (1998) and E9(R1) (2019) by analogy; FDA K261686 decision summary (public pivotal data used as planning context); STARD 2015 (BMJ 2015;351:h5527); FDA 2007 statistical guidance. See `claims_ledger.csv`.

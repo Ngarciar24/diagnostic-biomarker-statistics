@@ -1,0 +1,198 @@
+---
+title: "Companion diagnostics and bridging statistics"
+---
+
+```{r setup}
+#| include: false
+source("../R/helpers.R"); source("../R/bridging.R")
+suppressMessages({library(knitr); library(ggplot2); library(mice); library(MASS)})
+select <- dplyr::select
+```
+
+Tags: **[S]** primary public source, **[Y]** synthesis of standard theory, not a quotation, **[A]** simulation assumption. All trial data are simulated.
+
+## Concept
+
+| Term | Meaning |
+|---|---|
+| Companion diagnostic (CDx) | Test essential for the safe and effective use of a specific medicine (selects patients, or flags risk) |
+| Clinical trial assay (CTA) | The assay used to select/stratify patients in the pivotal drug trial; often not the final commercial IVD |
+| Bridging study | Shows the final CDx classifies like the CTA, and translates the trial result to the CDx+ population |
+| Concordance | PPA, NPA, OPA between CTA and CDx. **Not** sensitivity/specificity: neither assay is a reference |
+| Enrichment design | Only biomarker-positive patients randomised: cannot assess benefit in biomarker-negatives |
+| All-comers / stratified design | Everyone randomised, analysed by biomarker status; allows the treatment × biomarker interaction |
+
+Core problem: the drug effect was estimated in *CTA-defined* patients, but patients will be selected by the *CDx*. If the two disagree, the effect in the CDx+ population is not what the trial reported, and the bridging set is usually **incomplete** (samples not retained). [Y]
+
+## Regulatory anchor
+
+| Document | Verified statement | Tag |
+|---|---|---|
+| FDA, *In Vitro Companion Diagnostic Devices* (Aug 2014, final) | "An IVD companion diagnostic device is an in vitro diagnostic device that provides information that is essential for the safe and effective use of a corresponding therapeutic product." Footnote 10: most will be Class III, though a Class II/510(k) classification may be appropriate in some cases | [S] fda.gov/media/81309 |
+| FDA, *Principles for Codevelopment of an IVD CDx with a Therapeutic Product* (July 2016) | **Still a draft** ("not for implementation") on FDA's page, content-current 2018 | [S] fda.gov/media/99030 |
+| FDA, *Developing and Labeling IVD CDx for a Specific Group of Oncology Therapeutic Products* (Apr 2020, final) | The final title is "…Specific **Group** of…"; "Group or Class" was the draft title. Guidance body not read (landing page only) | [S] |
+| IVDR Art 2(7) | CDx = device "essential for the safe and effective use of a corresponding medicinal product" to identify patients most likely to benefit, or at increased risk of serious adverse reactions | [S] |
+| IVDR Annex VIII Rule 3(f) | CDx → **class C** | [S] |
+| IVDR Art 48(7), 48(8) | For CDx the notified body consults "a competent authority … under Directive 2001/83/EC or the EMA, as applicable" (Annex IX 5.2 / Annex X 3(k)); also 48(3)/(4) for class D | [S] |
+| IVDR Art 58(2) | CDx performance studies follow the additional-requirements articles; left-over-sample CDx studies are notified to the competent authority | [S] |
+| Annex XIII Part A | The performance evaluation report must cover scientific validity, analytical and clinical performance | [S] |
+| Specific bridging-study sample sizes, acceptance criteria | not set by these documents as far as read; *not verified* beyond the quoted text | – |
+
+## Analysis in R (simulated data)
+
+### Setting [A]
+
+Randomised all-comers trial, n = 1200, biomarker prevalence 40%. Response rates: control 20%; treatment 50% in biomarker-positive, 20% in negative (no benefit). CTA sensitivity/specificity vs the true biomarker state 0.93/0.90, CDx 0.97/0.95, errors independent given the true state (a simplification; real errors correlate). The simulation knows the truth; reality does not.
+
+```{r setting}
+truth_cdx <- true_effect_cdx_pos()
+truth_cta <- true_effect_cdx_pos(cdx = c(se = 0.93, sp = 0.90))
+kable(data.frame(Population = c("True biomarker-positive", "CTA-positive (what the trial analysed)", "CDx-positive (who will be treated)"),
+                 `Risk difference (treatment - control)` = round(c(0.30, truth_cta, truth_cdx), 3), check.names = FALSE),
+      caption = "Dilution by false positives: the effect depends on how the population is selected")
+```
+
+### Concordance on the bridging samples (PPA/NPA/OPA)
+
+```{r concordance}
+set.seed(81)
+d <- sim_trial(1200, miss = "MCAR", p_obs = 0.60)
+b <- d[d$obs == 1, ]
+a <- report_agreement(b$cdx == 1, b$cta == 1)
+kable(data.frame(Measure = a$measure, `x/n` = paste0(a$x, "/", a$n), Estimate = round(100 * a$est, 1),
+                 `Wilson 95% CI` = sprintf("%.1f - %.1f", 100 * a$lower, 100 * a$upper), check.names = FALSE),
+      caption = sprintf("CDx vs CTA in %d bridging samples (%.0f%% of the trial)", nrow(b), 100 * mean(d$obs)))
+```
+
+The CTA is the **comparator**, not a reference: call these PPA/NPA/OPA (FDA 2007 logic, Chapter 5). The reported agreement is below 100% *even though both assays are fairly accurate*, because both have errors against the (unobservable) truth. [Y]
+
+### Estimating efficacy in the CDx+ population when bridging samples are missing
+
+Estimators of the risk difference among CDx+ subjects: **full** (impossible in practice: CDx known for all), **complete case** (only subjects with a sample), **IPW** (weights 1/P(sample | CTA, arm)), **multiple imputation** of the CDx result (logistic on CTA, arm, response and arm×response; Rubin's rules). Missingness mechanisms: **MCAR** (60% random), **MAR** (sample more likely when CTA+), **MNAR** (sample more likely when the CDx itself is positive), **MNAR_resp** (as MNAR, and among CDx+ subjects responders are more likely to have a retained sample).
+
+```{r mc}
+set.seed(82)
+R <- 300
+run <- function(miss) {
+  out <- replicate(R, {
+    d <- sim_trial(1200, miss = miss)
+    e <- list(full = est_full(d), cc = est_cc(d), ipw = est_ipw(d), mi = est_mi(d, 10))
+    unlist(lapply(e, function(v) c(v[["est"]], v[["se"]])))
+  })
+  do.call(rbind, lapply(c("full", "cc", "ipw", "mi"), function(m) {
+    est <- out[paste0(m, "1"), ]; se <- out[paste0(m, "2"), ]
+    data.frame(Missingness = miss, Estimator = m, Bias = mean(est) - truth_cdx, RMSE = sqrt(mean((est - truth_cdx)^2)),
+               Coverage = mean(abs(est - truth_cdx) <= 1.96 * se))
+  }))
+}
+res <- rbind(run("MCAR"), run("MAR"), run("MNAR"), run("MNAR_resp"))
+kable(res, digits = 3, row.names = FALSE,
+      caption = sprintf("%d simulated trials per scenario; truth = %.3f", R, truth_cdx))
+```
+
+```{r mc-plot}
+#| fig-height: 3.4
+ggplot(res, aes(Estimator, Bias, fill = Estimator)) + geom_col(show.legend = FALSE) +
+  facet_wrap(~Missingness) + geom_hline(yintercept = 0) + theme_minimal() +
+  labs(subtitle = "Bias in the CDx+ risk difference by missingness mechanism")
+```
+
+Reading [Y]:
+
+- **MCAR/MAR**: all estimators are close to unbiased here; MI and IPW are the principled choices when availability depends on measured variables, and MI gains precision (smaller RMSE than complete case).
+- **MNAR (availability depends on the CDx result only)**: complete case is *still unbiased*. The analysis population is "CDx+ subjects", and selection that depends only on the stratifying variable does not distort a comparison *within* that stratum. IPW and MI, which model missingness through the CTA, are the ones that drift (MI worst).
+- **MNAR_resp (availability also depends on the outcome)**: now complete case (`r sprintf("%+.3f", res$Bias[res$Missingness == "MNAR_resp" & res$Estimator == "cc"])`) and IPW (`r sprintf("%+.3f", res$Bias[res$Missingness == "MNAR_resp" & res$Estimator == "ipw"])`) are distorted, because responders are over-represented among retained samples. MI, which conditions on the outcome, is least affected here (`r sprintf("%+.3f", res$Bias[res$Missingness == "MNAR_resp" & res$Estimator == "mi"])`) but is not protected in general: availability still depends on the CDx result itself. Only a sensitivity analysis can bracket the remaining risk.
+- The imputation model needed the arm × response term: omitting it gave a visible bias in a check, because the drug works only in biomarker-positives.
+
+The practical lesson is to **find out why samples are missing** before choosing the estimator, and to pre-specify the sensitivity analysis. [Y]
+
+### Tipping-point sensitivity analysis (MNAR)
+
+A tempting sensitivity analysis is to assume some fraction of the subjects without a sample are CDx+ and impute their status at random. That analysis cannot fail: status imputed independently of arm and response just mixes the observed CDx+ effect with the effect in the whole missing pool, which is itself positive, so the estimate never reaches zero. A useful analysis has to let the missing CDx status depend on the outcome.
+
+The **delta-adjusted** version below imputes the missing CDx results from the MAR model used by MI, then adds a logit offset δ for the missing subjects only: δ × arm × (+1 for responders, −1 for non-responders). δ < 0 means that, among subjects without a sample, treated responders are less likely to be CDx+ (and treated non-responders more likely) than the MAR model predicts, which pulls the CDx+ effect towards zero. δ = 0 is the MAR analysis. [Y]
+
+```{r tipping}
+set.seed(83)
+d <- sim_trial(1200, miss = "MNAR")
+grid <- seq(-6, 2, by = 0.5)
+tp <- do.call(rbind, lapply(grid, function(dl) { e <- est_tipping_delta(d, dl)
+  data.frame(delta = dl, est = e[["est"]], lo = e[["est"]] - 1.96 * e[["se"]], hi = e[["est"]] + 1.96 * e[["se"]]) }))
+tip <- if (any(tp$lo <= 0)) max(tp$delta[tp$lo <= 0]) else NA
+ggplot(tp, aes(delta, est)) + geom_ribbon(aes(ymin = lo, ymax = hi), alpha = .2) + geom_line() +
+  geom_hline(yintercept = 0) + geom_hline(yintercept = truth_cdx, linetype = 3) +
+  geom_vline(xintercept = 0, linetype = 2) +
+  { if (!is.na(tip)) geom_vline(xintercept = tip, colour = "#d95f02") } +
+  labs(x = "δ: logit shift for treated responders among subjects without a sample",
+       y = "Risk difference in CDx+",
+       subtitle = "dashed = MAR (δ = 0); dotted = true effect; orange = tipping point (lower 95% limit reaches 0)") +
+  theme_minimal()
+```
+
+```{r tipping-range}
+kable(tp[tp$delta %in% c(-6, -4, -2, -1, 0, 1, 2), ], digits = 3, row.names = FALSE,
+      caption = "Estimate and 95% limits at selected δ")
+c(tipping_point_delta = tip)
+```
+
+`r if (is.na(tip)) sprintf("No tipping point within the range examined: even at δ = %g, where the odds of being CDx+ for a treated responder without a sample are about %s times lower than the MAR model predicts, the lower 95%% limit stays above zero (%.3f). That is the strongest robustness statement this design allows; it holds because missing CDx results are only a part of the CDx+ population.", min(tp$delta), format(round(exp(-min(tp$delta))), big.mark = ","), tp$lo[which.min(tp$delta)]) else sprintf("The conclusion (lower 95%% limit above zero) holds from δ = 0 down to δ = %g. The report would state that value and argue whether a shift of that size is clinically plausible: δ = %g means the odds of being CDx+ for a treated responder without a sample are about %.0f times lower than the MAR model predicts.", tip + 0.5, tip, exp(-tip))` [Y]
+
+### Cross-check of the imputation with `mice`
+
+```{r mice}
+set.seed(84)
+d <- sim_trial(1200, miss = "MAR")
+d$cdx_m <- ifelse(d$obs == 1, d$cdx, NA)
+d$ar <- d$arm * d$resp
+imp <- mice(d[, c("cdx_m", "cta", "arm", "resp", "ar")], m = 20, method = c("logreg", "", "", "", ""), printFlag = FALSE)
+mi_mice <- mean(sapply(seq_len(20), function(i) {
+  x <- complete(imp, i); k <- x$cdx_m == 1; rd_est(x$arm[k], x$resp[k])[["est"]] }))
+mi_mine <- est_mi(d, 40)[["est"]]
+kable(data.frame(Method = c("hand MI", "mice (logreg)", "full information", "analytic truth"),
+                 `Risk difference CDx+` = round(c(mi_mine, mi_mice, est_full(d)[["est"]], truth_cdx), 3), check.names = FALSE))
+stopifnot(abs(mi_mine - mi_mice) < 0.03)
+```
+
+### Design: enrichment vs all-comers [A]
+
+Same number *randomised* (n = 160): enrichment randomises CTA+ only. With 40% biomarker prevalence and the CTA's 0.93/0.90 accuracy, about 43% of screened patients are CTA+, so enrichment screens about 2.3 patients per randomised one; all-comers randomises everyone, so only about 43% of its patients are CTA+. Power for the effect in the CTA+ population, and power of the treatment × biomarker interaction test (only possible with all-comers).
+
+```{r design}
+set.seed(85)
+nn <- 160
+cmp_prop <- function(d) suppressWarnings(prop.test(table(factor(d$arm, 0:1), factor(d$resp, 0:1))[, 2:1])$p.value) < .05
+pw_enrich <- function(reps = 600) mean(replicate(reps, {
+  d <- sim_trial(ceiling(nn / 0.40) + 60, miss = "none"); cmp_prop(d[d$cta == 1, ][seq_len(nn), ]) }))
+pw_all <- function(reps = 600) mean(replicate(reps, { d <- sim_trial(nn, miss = "none"); cmp_prop(d[d$cta == 1, ]) }))
+inter <- function(reps = 600) mean(replicate(reps, {
+  d <- sim_trial(nn, miss = "none"); f <- glm(resp ~ arm * cta, binomial, d)
+  summary(f)$coefficients["arm:cta", 4] < .05 }))
+kable(data.frame(
+  Design = c("Enrichment: effect in CTA+ (160 randomised CTA+)",
+             "All-comers (160 randomised): effect in its CTA+ subgroup",
+             "All-comers (160 randomised): treatment x CTA interaction"),
+  Power = c(pw_enrich(), pw_all(), inter())), digits = 3)
+```
+
+Enrichment gives the most power for the effect in the selected population but no information on biomarker-negatives (and none on CTA false negatives); the all-comers design costs power but supports the claim that benefit is *restricted* to biomarker-positives and is the base for a CDx labelling decision. [Y]
+
+### Estimand sketch for a CDx claim (ICH E9(R1) vocabulary by analogy) [Y]
+
+| Attribute | Choice here |
+|---|---|
+| Population | Patients who test CDx+ with the final IVD in the intended-use setting |
+| Treatment | Drug vs control |
+| Variable | Response (or time to event) |
+| Intercurrent events | Discontinuation, switching: handled by a pre-specified strategy (treatment-policy, hypothetical, …) |
+| Summary measure | Risk difference or ratio / hazard ratio in CDx+ |
+| Bridging-specific | How subjects without CDx samples are handled (IPW / MI / bounds), analysis of CTA-CDx discordant subjects |
+
+## Sources
+
+Simulation conclusions are synthesis and depend on the assumptions stated above.
+
+```{r sources-08}
+#| echo: false
+#| results: asis
+show_sources(8, "../claims_ledger.csv")
+```
