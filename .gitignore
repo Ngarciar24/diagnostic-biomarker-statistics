@@ -1,0 +1,19 @@
+# R / renv
+.Rhistory
+.RData
+.Rproj.user/
+renv/library/
+renv/staging/
+# Quarto: the book is built in CI and published on GitHub Pages
+_book/
+.quarto/
+_freeze/
+*_files/
+mock_sap/*.html
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+
+/.quarto/
+**/*.quarto_ipynb
