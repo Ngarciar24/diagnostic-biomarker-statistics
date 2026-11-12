@@ -1,0 +1,84 @@
+# Run the R unit tests, render the book from scratch (every chapter stops on a failed
+# cross-check), run the Python/SQL re-derivation of the mock SAP endpoints, and publish
+# the book on GitHub Pages. If a run fails on a missing system library, the fix is almost
+# always one more package in the apt-get line below.
+name: build-and-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      RENV_CONFIG_REPOS_OVERRIDE: https://packagemanager.posit.co/cran/__linux__/noble/latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System libraries
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            libcurl4-openssl-dev libssl-dev libxml2-dev libfontconfig1-dev \
+            libharfbuzz-dev libfribidi-dev libfreetype6-dev libpng-dev \
+            libtiff5-dev libjpeg-dev libudunits2-dev libgdal-dev libgeos-dev \
+            libproj-dev libsqlite3-dev
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: renv
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-renv@v2
+
+      - name: R unit tests
+        run: Rscript -e 'testthat::test_dir("tests/testthat", stop_on_failure = TRUE)'
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Render the book
+        run: quarto render
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python / SQL re-derivation of the SAP endpoints
+        run: |
+          pip install pytest
+          python3 python/check_sap.py
+          python3 -m pytest -q python
+
+      - name: Keep the QC outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qc-outputs
+          path: outputs/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _book
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
