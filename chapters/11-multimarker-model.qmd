@@ -1,0 +1,180 @@
+---
+title: "Combining markers: logistic model, optimism and calibration"
+---
+
+```{r setup}
+#| include: false
+source("../R/helpers.R")
+suppressMessages({library(knitr); library(ggplot2); library(pROC); library(rms)})
+```
+
+Tags: **[S]** primary public source, **[Y]** synthesis of standard theory, not a quotation, **[A]** simulation assumption. All data simulated.
+
+## Concept
+
+A single marker rarely carries all the information. Age, genotype or kidney function can shift both the pre-test probability and the marker level itself. A multivariable model turns them into one predicted probability. Three questions then decide whether it can be used:
+
+| Question | Statistic | Trap |
+|---|---|---|
+| Does it separate cases from non-cases? | AUC (c-statistic) | measured on the data used to fit it, it is **optimistic** |
+| Are the predicted probabilities right? | calibration-in-the-large, calibration slope, calibration plot | a good AUC says nothing about calibration |
+| Does it help decisions? | net benefit across risk thresholds (decision curve) | AUC and calibration do not weigh false positives against false negatives |
+
+Internal validation (bootstrap) estimates the optimism; external validation in a different population checks transportability. [Y]
+
+## Regulatory and methodological anchor
+
+| Item | Statement | Tag |
+|---|---|---|
+| TRIPOD (2015) and TRIPOD+AI (2024) | reporting guideline for studies developing or validating multivariable prediction models | [S] |
+| Harrell, Lee & Mark (1996) | bootstrap optimism correction and calibration for prognostic models | [S] |
+| Steyerberg & Vergouwe (2014) | calibration-in-the-large and calibration slope as the core of validation | [S] |
+| Vickers & Elkin (2006) | decision curve analysis: net benefit = TP/n − FP/n × p_t / (1 − p_t) | [S] |
+| IVDR / FDA | an algorithm that combines a marker with other inputs into a result is part of the device; its performance is evaluated like any other output | [Y] |
+
+## Analysis in R (simulated data)
+
+### Two populations [A]
+
+Development: secondary care, amyloid prevalence about 45%. External validation: primary care, younger, prevalence about 20%. The marker depends on amyloid status **and** on kidney function (lower eGFR raises it), as in Chapter 6.
+
+```{r sim}
+sim_pop <- function(n, seed, age_mu, apoe_p, b0) {
+  set.seed(seed)
+  age  <- round(pmin(90, pmax(55, rnorm(n, age_mu, 7))))
+  apoe <- rbinom(n, 1, apoe_p)
+  egfr <- round(pmin(120, pmax(15, rnorm(n, 75, 20))))
+  amy  <- rbinom(n, 1, plogis(b0 + 0.06 * (age - 72) + 1.0 * apoe))
+  lptau <- -0.80 + 0.35 * amy + 0.004 * (75 - egfr) + rnorm(n, 0, 0.25)
+  data.frame(amy, lptau, age, apoe, egfr)
+}
+dev <- sim_pop(600,  111, age_mu = 72, apoe_p = 0.35, b0 = -0.6)
+val <- sim_pop(1000, 112, age_mu = 68, apoe_p = 0.28, b0 = -1.6)
+c(prev_dev = mean(dev$amy), prev_val = mean(val$amy))
+```
+
+### Marker alone versus the combined model
+
+```{r fit}
+f_marker <- glm(amy ~ lptau, binomial, dev)
+f_full   <- glm(amy ~ lptau + age + apoe + egfr, binomial, dev)
+sc <- c(lptau = 0.1, age = 10, apoe = 1, egfr = 10)          # report per clinically readable unit
+ci <- confint.default(f_full)[names(sc), ]
+kable(data.frame(Predictor = c("log10 marker, per 0.1", "age, per 10 years", "APOE e4 carrier", "eGFR, per 10 mL/min"),
+                 OR = exp(coef(f_full)[names(sc)] * sc), lower = exp(ci[, 1] * sc), upper = exp(ci[, 2] * sc)),
+      digits = 3, row.names = FALSE, caption = "Combined model: odds ratios with Wald 95% CI")
+r_m <- roc(dev$amy, fitted(f_marker), quiet = TRUE, direction = "<")
+r_f <- roc(dev$amy, fitted(f_full),   quiet = TRUE, direction = "<")
+c(AUC_marker = as.numeric(auc(r_m)), AUC_full = as.numeric(auc(r_f)),
+  DeLong_p = roc.test(r_m, r_f, paired = TRUE)$p.value)
+```
+
+The eGFR coefficient is positive although eGFR has no effect on amyloid in the simulation: for a given marker level, a low eGFR explains part of the high value, so the probability of amyloid is lower. Adjusting a marker for a non-disease source of variation is a legitimate use of a covariate, and it is the reason to collect kidney function in the study. [Y]
+
+### Internal validation: bootstrap optimism
+
+Refit the whole model in each bootstrap sample, measure its AUC on the bootstrap sample and on the original data; the mean difference is the optimism (Harrell's method). Cross-check against `rms::validate`, which reports Somers' D_xy = 2 (AUC − 0.5).
+
+```{r optimism}
+auc_of <- function(fit, data) auc_delong(predict(fit, data)[data$amy == 1],
+                                         predict(fit, data)[data$amy == 0])[["auc"]]
+form <- amy ~ lptau + age + apoe + egfr
+apparent <- auc_of(f_full, dev)
+set.seed(113)
+opt <- replicate(300, {
+  b <- dev[sample(nrow(dev), replace = TRUE), ]
+  fb <- glm(form, binomial, b)
+  auc_of(fb, b) - auc_of(fb, dev)
+})
+lfit <- lrm(form, data = dev, x = TRUE, y = TRUE)
+set.seed(113)
+v <- validate(lfit, B = 300)
+rms_corrected <- 0.5 + v["Dxy", "index.corrected"] / 2
+kable(data.frame(
+  Quantity = c("Apparent AUC", "Optimism (hand)", "Corrected AUC (hand)", "Corrected AUC (rms::validate)",
+               "Calibration slope, bootstrap-corrected (rms)"),
+  Value = c(apparent, mean(opt), apparent - mean(opt), rms_corrected, v["Slope", "index.corrected"])),
+  digits = 4)
+stopifnot(abs((apparent - mean(opt)) - rms_corrected) < 0.01)
+```
+
+With 600 subjects and four predictors the optimism is small. It grows with more candidate predictors, data-driven selection and smaller samples, which is when the corrected value matters. The bootstrap-corrected calibration slope below 1 measures the shrinkage the model needs. [Y]
+
+### External validation: discrimination and calibration
+
+```{r external}
+lp_val <- predict(f_full, val)                       # linear predictor (log-odds)
+p_val  <- plogis(lp_val)
+citl   <- coef(glm(val$amy ~ offset(lp_val), binomial))[[1]]     # calibration-in-the-large
+cal    <- coef(glm(val$amy ~ lp_val, binomial))                   # calibration intercept and slope
+vp     <- val.prob(p_val, val$amy, pl = FALSE)
+kable(data.frame(
+  Measure = c("AUC", "Calibration-in-the-large", "Calibration slope", "Brier score",
+              "Mean predicted risk", "Observed prevalence"),
+  Hand = c(auc_delong(p_val[val$amy == 1], p_val[val$amy == 0])[["auc"]], citl, cal[[2]],
+           mean((p_val - val$amy)^2), mean(p_val), mean(val$amy)),
+  `rms::val.prob` = c(vp[["C (ROC)"]], NA, vp[["Slope"]], vp[["Brier"]], NA, NA),
+  check.names = FALSE), digits = 4)
+stopifnot(abs(cal[[2]] - vp[["Slope"]]) < 1e-6, abs(cal[[1]] - vp[["Intercept"]]) < 1e-6,
+          abs(mean((p_val - val$amy)^2) - vp[["Brier"]]) < 1e-10)
+```
+
+Discrimination transports; calibration does not. The calibration slope is close to 1, so the predictor effects hold, but the model over-predicts in primary care because the pre-test probability is lower there (negative calibration-in-the-large). Updating only the intercept fixes it: [Y]
+
+```{r recal}
+lp_recal <- lp_val + citl
+cal_df <- function(p, y, label, groups = 10) {
+  g <- cut(p, unique(quantile(p, seq(0, 1, length.out = groups + 1))), include.lowest = TRUE)
+  do.call(rbind, lapply(split(data.frame(p, y), g), function(s) {
+    w <- ci_wilson(sum(s$y), nrow(s))
+    data.frame(model = label, pred = mean(s$p), obs = w[["est"]], lo = w[["lower"]], hi = w[["upper"]])
+  }))
+}
+cd <- rbind(cal_df(p_val, val$amy, "Development model"),
+            cal_df(plogis(lp_recal), val$amy, "Intercept recalibrated"))
+ggplot(cd, aes(pred, obs, colour = model)) +
+  geom_abline(linetype = 3) + geom_pointrange(aes(ymin = lo, ymax = hi), size = 0.3) + geom_line() +
+  coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "Predicted probability (decile mean)", y = "Observed fraction (Wilson 95% CI)", colour = NULL) +
+  theme_minimal() + theme(legend.position = "bottom")
+c(mean_pred_recalibrated = mean(plogis(lp_recal)), observed = mean(val$amy))
+```
+
+### Decision curve
+
+Net benefit at threshold probability p_t counts true positives and charges each false positive at the odds p_t / (1 − p_t). "Treat all" and "treat none" are the reference strategies. [S: Vickers & Elkin]
+
+```{r dca}
+nb <- function(p, y, pt) sapply(pt, function(t) {
+  pos <- p >= t
+  sum(pos & y == 1) / length(y) - sum(pos & y == 0) / length(y) * t / (1 - t) })
+pt <- seq(0.05, 0.60, by = 0.01)
+p_mk <- plogis(predict(f_marker, val) + coef(glm(val$amy ~ offset(predict(f_marker, val)), binomial))[[1]])
+nb_comb <- nb(plogis(lp_recal), val$amy, pt); nb_mk <- nb(p_mk, val$amy, pt)
+dc <- rbind(
+  data.frame(pt, strategy = "Combined model (recalibrated)", nb = nb_comb),
+  data.frame(pt, strategy = "Marker alone (recalibrated)",   nb = nb_mk),
+  data.frame(pt, strategy = "Treat all", nb = nb(rep(1, nrow(val)), val$amy, pt)),
+  data.frame(pt, strategy = "Treat none", nb = 0))
+# check: treat-all net benefit equals prevalence - (1 - prevalence) * odds(pt)
+prev <- mean(val$amy)
+stopifnot(isTRUE(all.equal(dc$nb[dc$strategy == "Treat all"], prev - (1 - prev) * pt / (1 - pt))))
+ggplot(dc, aes(pt, nb, colour = strategy)) + geom_line() +
+  coord_cartesian(ylim = c(-0.05, prev)) +
+  labs(x = "Threshold probability", y = "Net benefit", colour = NULL) +
+  theme_minimal() + theme(legend.position = "bottom")
+```
+
+The combined model has a higher net benefit than the marker alone at `r round(100 * mean(nb_comb > nb_mk))`% of the thresholds from 5% to 60%, with a largest gain of `r sprintf("%.3f", max(nb_comb - nb_mk))` (net true positives per patient, about `r round(1000 * max(nb_comb - nb_mk))` per 1,000 tested). Both beat "treat all" above a threshold of about `r sprintf("%.0f%%", 100 * min(pt[nb_comb > nb(rep(1, nrow(val)), val$amy, pt)]))`. Most of the information is in the marker; the covariates refine it. [Y]
+
+### What a report needs (TRIPOD) [Y]
+
+Source and dates of the data, eligibility and setting, outcome definition and blinding, predictors and how they were measured, sample size and events, missing data handling, the full model equation (so others can validate it), apparent and optimism-corrected performance, calibration in every validation population, and the limitations of transportability.
+
+## Sources
+
+```{r sources-11}
+#| echo: false
+#| results: asis
+show_sources(11, "../claims_ledger.csv")
+```

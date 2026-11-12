@@ -1,0 +1,218 @@
+---
+title: "Time-to-event outcomes and confounding in real-world data"
+---
+
+```{r setup}
+#| include: false
+source("../R/helpers.R")
+suppressMessages({library(knitr); library(ggplot2); library(survival); library(timeROC)})
+```
+
+Tags: **[S]** primary public source, **[Y]** synthesis of standard theory, not a quotation, **[A]** simulation assumption. All data simulated.
+
+## Concept
+
+| Question | Method | Trap |
+|---|---|---|
+| Does a baseline marker predict *when* an event happens? | Kaplan–Meier by marker group, Cox model | censoring is not failure; the proportional-hazards assumption must be checked |
+| How well does the marker separate who has the event by time t? | time-dependent AUC (cumulative cases / dynamic controls), Harrell's C | ignoring censoring biases the AUC; weight by the inverse probability of remaining uncensored |
+| Does a treatment given in routine care change the outcome? | propensity score, inverse probability of treatment weighting (IPTW), balance diagnostics | confounding by indication: sicker patients are treated more often |
+| How strong would unmeasured confounding have to be? | E-value | it bounds, it does not correct |
+
+The prognostic part fits a biomarker programme (from diagnostic aid to a prognostic or enrichment claim); the confounding part is the core of real-world evidence (RWE) studies on registry, claims or hospital data. [Y]
+
+## Regulatory and methodological anchor
+
+| Item | Statement | Tag |
+|---|---|---|
+| ICH E9(R1) (2019) | estimand framework: population, treatment, variable, intercurrent events, summary measure | [S] |
+| STROBE (2007) | reporting guideline for observational cohort, case-control and cross-sectional studies | [S] |
+| Grambsch & Therneau (1994) | test of proportional hazards from scaled Schoenfeld residuals (`cox.zph`) | [S] |
+| Uno et al. (2007); Blanche et al. (2013) | inverse-probability-of-censoring-weighted estimators of time-dependent ROC curves and AUC | [S] |
+| Austin (2011) | propensity score methods; standardised mean difference < 0.1 as a balance rule of thumb | [S] |
+| VanderWeele & Ding (2017) | E-value: minimum strength of association an unmeasured confounder would need with both treatment and outcome | [S] |
+
+## Analysis in R (simulated data)
+
+### A real-world cohort [A]
+
+1,500 patients with mild cognitive impairment from routine care, baseline plasma marker, followed for progression to dementia for up to 6 years. A symptomatic drug is started at baseline more often in older patients and in those with a higher marker (confounding by indication). True effects: hazard ratio 1.8 per SD of the log marker, 1.4 per 10 years of age, 1.5 for APOE ε4, and **0.75 for the drug** (conditional on the covariates).
+
+```{r sim}
+sim_cohort <- function(n, seed, treat = c("observational", "all", "none")) {
+  treat <- match.arg(treat)
+  set.seed(seed)
+  age  <- rnorm(n, 72, 7); apoe <- rbinom(n, 1, 0.35)
+  z    <- rnorm(n) + 0.5 * apoe                      # standardised log marker
+  trt  <- switch(treat,
+    observational = rbinom(n, 1, plogis(-0.6 + 0.9 * z + 0.05 * (age - 72))),
+    all = rep(1, n), none = rep(0, n))
+  lp   <- log(1.8) * z + log(1.4) * (age - 72) / 10 + log(1.5) * apoe + log(0.75) * trt
+  shape <- 1.3; scale0 <- 9                          # Weibull baseline, years
+  t_event <- scale0 * (-log(runif(n)) / exp(lp))^(1 / shape)
+  t_cens  <- pmin(runif(n, 2, 6), rexp(n, 0.05))      # administrative end + loss to follow-up
+  data.frame(time = pmin(t_event, t_cens), event = as.integer(t_event <= t_cens),
+             z, age, apoe, trt)
+}
+coh <- sim_cohort(1500, 121)
+coh$age10 <- (coh$age - 72) / 10                  # age centred at 72, per 10 years
+c(n = nrow(coh), events = sum(coh$event), treated = mean(coh$trt),
+  median_follow_up_years = median(coh$time))
+```
+
+### Kaplan–Meier by marker group, with a hand check
+
+```{r km}
+coh$zgrp <- cut(coh$z, quantile(coh$z, c(0, 1/3, 2/3, 1)), include.lowest = TRUE,
+                labels = c("low", "middle", "high"))
+km <- survfit(Surv(time, event) ~ zgrp, coh)
+lr <- survdiff(Surv(time, event) ~ zgrp, coh)
+# hand Kaplan-Meier at 3 years in the high group: product over event times of (1 - d/n)
+km_hand <- function(time, event, t) {
+  ut <- sort(unique(time[event == 1 & time <= t]))
+  prod(vapply(ut, function(u) 1 - sum(time == u & event == 1) / sum(time >= u), numeric(1)))
+}
+h <- coh[coh$zgrp == "high", ]
+s3 <- summary(km, times = 3)
+kable(data.frame(group = levels(coh$zgrp), `S(3 years)` = s3$surv,
+                 lower = s3$lower, upper = s3$upper, check.names = FALSE), digits = 3,
+      caption = sprintf("Dementia-free survival at 3 years; log-rank p = %.2g", pchisq(lr$chisq, 2, lower.tail = FALSE)))
+stopifnot(abs(km_hand(h$time, h$event, 3) - s3$surv[3]) < 1e-12)
+```
+
+```{r km-plot}
+#| fig-height: 3.6
+kd <- data.frame(time = km$time, surv = km$surv,
+                 group = rep(sub("zgrp=", "", names(km$strata)), km$strata))
+ggplot(kd, aes(time, surv, colour = group)) + geom_step() +
+  labs(x = "Years from baseline", y = "Dementia-free", colour = "Marker tertile") +
+  theme_minimal() + theme(legend.position = "bottom")
+```
+
+### Cox model, with the partial likelihood maximised by hand
+
+```{r cox}
+cx <- coxph(Surv(time, event) ~ z + age10 + apoe + trt, coh)
+X  <- cbind(coh$z, coh$age10, coh$apoe, coh$trt)
+negpl <- function(b) {                         # Breslow partial log-likelihood (no ties: continuous times)
+  eta <- drop(X %*% b); o <- order(coh$time, decreasing = TRUE)
+  risk <- cumsum(exp(eta[o]))                  # sum over the risk set, longest time first
+  -sum((eta[o] - log(risk))[coh$event[o] == 1])
+}
+bh <- optim(rep(0, 4), negpl, method = "BFGS", control = list(reltol = 1e-12))$par
+kable(data.frame(term = c("marker (per SD)", "age (per 10 y)", "APOE e4", "drug"),
+                 HR = exp(coef(cx)), lower = exp(confint(cx))[, 1], upper = exp(confint(cx))[, 2],
+                 HR_hand = exp(bh), truth = c(1.8, 1.4, 1.5, 0.75)), digits = 3, row.names = FALSE)
+stopifnot(max(abs(bh - coef(cx))) < 1e-4)
+zph <- cox.zph(cx)
+kable(as.data.frame(zph$table), digits = 3, caption = "Proportional-hazards test (scaled Schoenfeld residuals)")
+```
+
+The simulation has proportional hazards by construction, so any rejection here is a chance finding: with four covariate tests at the 5% level, one rejection in a given dataset is not unusual (terms with p < 0.05 here: `r { k <- rownames(zph$table)[-nrow(zph$table)][zph$table[-nrow(zph$table), "p"] < 0.05]; if (length(k)) paste(k, collapse = ", ") else "none" }`; global p = `r sprintf("%.2f", zph$table["GLOBAL", "p"])`). The residual plot, not the p-value alone, decides; with real data a single small p-value calls for a look at `plot(zph)`, not an automatic change of model. When the test or the residual plot shows a trend, the options are a time-varying coefficient, stratification, or a summary that does not assume proportional hazards (restricted mean survival time). [Y]
+
+### How well the marker predicts dementia by 3 years
+
+Cumulative/dynamic definition: cases had the event by 3 years, controls are still event-free at 3 years. Censored subjects are handled by inverse probability of censoring weights, using the Kaplan–Meier estimate of the censoring distribution G. Hand implementation versus `timeROC`:
+
+```{r tdauc}
+t0 <- 3
+G <- survfit(Surv(time, 1 - event) ~ 1, coh)
+G_at <- function(t) summary(G, times = t, extend = TRUE)$surv
+G_minus <- stepfun(G$time, c(1, G$surv), right = TRUE)        # G(t-), left limit
+case <- coh$time <= t0 & coh$event == 1; ctrl <- coh$time > t0
+w_case <- 1 / G_minus(coh$time[case]); w_ctrl <- rep(1 / G_at(t0), sum(ctrl))
+m_case <- coh$z[case]; m_ctrl <- coh$z[ctrl]
+num <- sum(w_case * vapply(m_case, function(m) sum(w_ctrl * ((m > m_ctrl) + 0.5 * (m == m_ctrl))), numeric(1)))
+auc_hand <- num / (sum(w_case) * sum(w_ctrl))
+tr <- timeROC(T = coh$time, delta = coh$event, marker = coh$z, cause = 1,
+              weighting = "marginal", times = t0, iid = TRUE)
+c_harrell <- concordance(Surv(time, event) ~ z, coh, reverse = TRUE)$concordance
+kable(data.frame(Measure = c("Time-dependent AUC at 3 years (hand, IPCW)", "Same, timeROC",
+                             "timeROC 95% CI", "Harrell's C over all follow-up"),
+                 Value = c(sprintf("%.4f", auc_hand), sprintf("%.4f", tr$AUC[2]),
+                           sprintf("%.3f - %.3f", confint(tr)$CI_AUC[1] / 100, confint(tr)$CI_AUC[2] / 100),
+                           sprintf("%.4f", c_harrell))))
+stopifnot(abs(auc_hand - tr$AUC[2]) < 1e-3)
+```
+
+### The drug: confounding by indication
+
+The crude comparison makes the drug look harmful, because treated patients start with a higher marker and are older.
+
+```{r ps}
+ps_fit <- glm(trt ~ z + age + apoe, binomial, coh)
+coh$ps <- fitted(ps_fit)
+pt <- mean(coh$trt)
+coh$w <- ifelse(coh$trt == 1, pt / coh$ps, (1 - pt) / (1 - coh$ps))    # stabilised IPT weights
+smd <- function(x, trt, w = rep(1, length(x))) {
+  m1 <- weighted.mean(x[trt == 1], w[trt == 1]); m0 <- weighted.mean(x[trt == 0], w[trt == 0])
+  (m1 - m0) / sqrt((var(x[trt == 1]) + var(x[trt == 0])) / 2)
+}
+bal <- data.frame(covariate = c("marker z", "age", "APOE e4"),
+  SMD_before = sapply(coh[c("z", "age", "apoe")], smd, trt = coh$trt),
+  SMD_after  = sapply(coh[c("z", "age", "apoe")], smd, trt = coh$trt, w = coh$w))
+kable(bal, digits = 3, row.names = FALSE, caption = "Standardised mean differences (rule of thumb: |SMD| < 0.1)")
+c(weight_mean = mean(coh$w), weight_max = max(coh$w))
+stopifnot(all(abs(bal$SMD_after) < 0.1))
+```
+
+```{r ps-overlap}
+#| fig-height: 3
+ggplot(coh, aes(ps, fill = factor(trt, labels = c("untreated", "treated")))) +
+  geom_density(alpha = 0.4) + labs(x = "Propensity score", y = NULL, fill = NULL) +
+  theme_minimal() + theme(legend.position = "bottom")
+```
+
+The two propensity-score distributions overlap over the whole range, so every patient has a counterpart in the other group and the weights stay moderate. [Y]
+
+The weighted Cox model estimates a **marginal** hazard ratio, which is not the same number as the conditional HR of 0.75 (the hazard ratio is non-collapsible). Its target is approximated by a very large simulated trial in which everyone is, and then no one is, treated: [Y]
+
+```{r effects}
+crude <- coxph(Surv(time, event) ~ trt, coh)
+adj   <- coxph(Surv(time, event) ~ trt + z + age + apoe, coh)
+ipw   <- coxph(Surv(time, event) ~ trt, coh, weights = w, robust = TRUE)
+big <- rbind(sim_cohort(200000, 122, "all"), sim_cohort(200000, 123, "none"))
+marg_truth <- exp(coef(coxph(Surv(time, event) ~ trt, big)))
+row <- function(f, label) data.frame(Analysis = label, HR = exp(coef(f)[["trt"]]),
+  lower = exp(confint(f)["trt", 1]), upper = exp(confint(f)["trt", 2]))
+eff <- rbind(row(crude, "Crude Cox"), row(adj, "Covariate-adjusted Cox (conditional)"),
+             row(ipw, "IPTW Cox, robust SE (marginal)"))
+kable(eff, digits = 3, row.names = FALSE,
+      caption = sprintf("Truth: conditional HR 0.75; marginal HR %.3f", marg_truth))
+```
+
+### E-value for unmeasured confounding
+
+For a hazard ratio with a common outcome, convert to an approximate risk ratio, RR ≈ (1 − 0.5^√HR) / (1 − 0.5^√(1/HR)), then E = RR + √(RR(RR − 1)) with RR taken on the side above 1. [S: VanderWeele & Ding 2017]
+
+```{r evalue}
+e_value <- function(hr) {
+  rr <- (1 - 0.5^sqrt(hr)) / (1 - 0.5^sqrt(1 / hr))
+  rr <- ifelse(rr < 1, 1 / rr, rr)
+  rr + sqrt(rr * (rr - 1))
+}
+ip <- eff[eff$Analysis == "IPTW Cox, robust SE (marginal)", ]
+c(E_value_point = e_value(ip$HR), E_value_CI_limit = if (ip$upper < 1) e_value(ip$upper) else 1)
+```
+
+An unmeasured confounder would need associations of at least that size (risk-ratio scale) with both the drug and dementia, beyond the measured covariates, to explain away the point estimate; the second number is the bar for moving the confidence limit to 1. [Y]
+
+### Estimand and reporting [Y]
+
+| Attribute | Choice here |
+|---|---|
+| Population | MCI patients in routine care meeting the eligibility criteria at baseline |
+| Treatment | Drug started at baseline versus not started (new-user design) |
+| Variable | Time to dementia diagnosis |
+| Intercurrent events | Treatment switching, death: pre-specified strategy (treatment-policy here; competing-risk analysis for death in a real study) |
+| Summary measure | Marginal hazard ratio (IPTW); restricted mean survival time difference as a supplementary measure |
+
+Report following STROBE: data source, eligibility, follow-up, covariates in the propensity model and why, balance before and after weighting, weight distribution, and the sensitivity analyses (E-value, alternative models, trimming).
+
+## Sources
+
+```{r sources-12}
+#| echo: false
+#| results: asis
+show_sources(12, "../claims_ledger.csv")
+```
