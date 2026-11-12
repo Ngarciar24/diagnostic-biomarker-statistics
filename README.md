@@ -25,6 +25,19 @@ All data are simulated. The only real figures are public numbers from an FDA 510
 | 11 | Combining markers | logistic model, bootstrap optimism (checked against `rms::validate`), external validation, calibration, decision curve |
 | 12 | Time-to-event and confounding | Kaplan–Meier and Cox (partial likelihood maximised by hand), PH diagnostics, IPCW time-dependent AUC (checked against `timeROC`), propensity-score weighting, balance, E-value |
 
+## Results
+
+**A published result, reproduced.** Chapter 6 rebuilds the pivotal 3×2 table of the FDA 510(k) decision summary K261686 (plasma pTau217 vs amyloid PET, N = 958) and recomputes its agreement statistics. The build stops if any value differs from the published one.
+
+| Measure (intermediates count as disagreement) | FDA K261686, % (95% CI) | Reproduced, Wilson |
+|---|---|---|
+| Positive percent agreement (285/378) | 75.4 (70.8-79.5) | 75.4 (70.8-79.5) |
+| Negative percent agreement (424/580) | 73.1 (69.4-76.6) | 73.1 (69.4-76.6) |
+
+**Two cut-offs and the intermediate zone** (Chapter 6, simulated derivation cohort): the rule-out cut-off holds sensitivity at 94% or more, the rule-in cut-off holds specificity at 93% or more, and results in between are reported as intermediate.
+
+![TG-ROC plot: sensitivity and specificity against the threshold, with the intermediate zone between the two cut-offs shaded](outputs/figures/two_cutoffs_tgroc.png)
+
 ## Checks and reproducibility
 
 - **R unit tests** (`tests/testthat/`) cover every helper in `R/`: interval methods, EP05 ANOVA, EP17 estimators, Deming/Passing–Bablok, DeLong, cut-off derivation, sample-size functions and the bridging simulation.
@@ -71,7 +84,7 @@ mock_sap/                   SAP template, filled mock SAP, simulation script and
 R/                          helper functions used by the chapters
 tests/testthat/             unit tests of the helpers
 python/                     SQL edit checks and cross-language re-derivation of the SAP endpoints, with pytest tests
-outputs/                    endpoints exported by the SAP; outputs/qc/ holds the edit-check and cross-check reports
+outputs/                    endpoints exported by the SAP; outputs/qc/ holds the edit-check and cross-check reports; outputs/figures/ the README figure
 claims_ledger.csv           every sourced claim with its source, date checked and confidence
 question_map.csv            task → governing document → R tools
 cache/                      posterior draws of the one Stan model, so the book renders without compiling Stan

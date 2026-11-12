@@ -149,10 +149,14 @@ g <- do.call(rbind, lapply(sort(unique(train$x)), function(thr)
   data.frame(t = thr, Sensitivity = mean(train$x[train$y == 1] > thr), Specificity = mean(train$x[train$y == 0] <= thr))))
 gl <- rbind(data.frame(t = g$t, value = g$Sensitivity, Measure = "Sensitivity (x > t)"),
             data.frame(t = g$t, value = g$Specificity, Measure = "Specificity (x <= t)"))
-ggplot(gl, aes(t, value, colour = Measure)) + geom_line() + scale_x_log10() +
+p_tg <- ggplot(gl, aes(t, value, colour = Measure)) + geom_line() + scale_x_log10() +
   geom_vline(xintercept = unlist(co), linetype = 2) +
   annotate("rect", xmin = co[["lo"]], xmax = co[["hi"]], ymin = 0, ymax = 1, alpha = .08) +
   labs(x = "Threshold (pg/mL, log scale)", y = NULL, subtitle = "TG-ROC: shaded = intermediate zone") + theme_minimal()
+p_tg
+dir.create("../outputs/figures", recursive = TRUE, showWarnings = FALSE)
+ggsave("../outputs/figures/two_cutoffs_tgroc.png", p_tg + theme(legend.position = "bottom"),
+       width = 7, height = 3.8, dpi = 150, bg = "white")
 ```
 
 For comparison, a single Youden cut-off on the same data:
