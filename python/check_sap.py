@@ -8,6 +8,15 @@
    and exit non-zero on any edit-check failure or any difference above the tolerance.
 
 Standard library only. Run from the repository root:  python3 python/check_sap.py
+
+Program    : python/check_sap.py
+Inputs     : mock_sap/data/sim_ptau217.csv, mock_sap/data/locked_cutoffs.csv,
+             outputs/sap_primary_endpoints.csv (written by mock_sap/sap_ptau217_mock.qmd)
+Outputs    : outputs/qc/edit_checks.csv, outputs/qc/python_crosscheck.csv;
+             exit status 1 on any edit-check failure or R/Python difference
+Author     : Ignacio G. Ribelles
+Created    : 2026-11-12
+Change log : 2026-11-12  IGR  Initial version
 """
 
 from __future__ import annotations

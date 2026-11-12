@@ -1,5 +1,22 @@
+# -----------------------------------------------------------------------------
+# Program    : R/helpers.R
+# Purpose    : Shared statistical helpers sourced by the chapters and the mock SAP:
+#              interval methods, EP05 ANOVA, EP17 LoB/LoD, method comparison, ROC,
+#              two-cut-off derivation and performance, sample size, sources table
+# Inputs     : none (pure functions); show_sources() reads claims_ledger.csv
+# Outputs    : none (functions only)
+# Author     : Ignacio G. Ribelles
+# Created    : 2026-10-16
+# Change log : 2026-10-16  IGR  Initial version
+#              2026-11-12  IGR  EP17 estimators: pooled SD by sample, small-sample
+#                               multiplier, rank rule 0.5 + 0.95 B (quantile type 5),
+#                               nonparametric LoD; guard in derive_two_cutoffs();
+#                               show_sources() and sim_ep05() added
+# Notes      : Every function is unit-tested in tests/testthat/test-helpers.R.
+#              deming_hand() takes delta = var(err_y) / var(err_x), the inverse of
+#              mcr's error.ratio.
+# -----------------------------------------------------------------------------
 if (!exists("%||%", baseenv())) `%||%` <- function(x, y) if (is.null(x)) y else x  # R < 4.4 compat (lme4 printing)
-# Shared helpers for the chapters. Each function is unit-tested in tests/testthat.
 
 # ---- Proportion confidence intervals -------------------------------------
 ci_wilson <- function(x, n, conf = 0.95) {

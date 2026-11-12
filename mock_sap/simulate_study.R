@@ -1,6 +1,17 @@
-# Simulated two-cut-off pTau217-like clinical performance study ("SIM-217-001").
-# Run from the repository root:  Rscript mock_sap/simulate_study.R
-# All data are simulated. No real assay or patient data are used.
+# -----------------------------------------------------------------------------
+# Program    : mock_sap/simulate_study.R
+# Purpose    : Simulate study SIM-217-001 for the mock SAP: a derivation cohort that
+#              fixes the two cut-offs, then the clinical performance study data
+# Inputs     : R/helpers.R (derive_two_cutoffs)
+# Outputs    : mock_sap/data/locked_cutoffs.csv
+#              mock_sap/data/sim_ptau217.csv
+# Author     : Ignacio G. Ribelles
+# Created    : 2026-10-16
+# Change log : 2026-10-16  IGR  Initial version
+# Notes      : Run from the repository root: Rscript mock_sap/simulate_study.R.
+#              All data are simulated; no real assay or patient data are used.
+#              Re-running overwrites the locked cut-offs; their md5 is in SAP section 13.
+# -----------------------------------------------------------------------------
 source("R/helpers.R")
 
 marker <- function(y, egfr, shift = TRUE) {

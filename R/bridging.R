@@ -1,5 +1,16 @@
-# Companion-diagnostic bridging simulation (Chapter 8). All functions are tested in tests/testthat.
-
+# -----------------------------------------------------------------------------
+# Program    : R/bridging.R
+# Purpose    : Simulation of a CDx bridging study with missing bridging samples and
+#              estimators of the treatment effect in CDx+ subjects (Chapter 8)
+# Inputs     : none (simulated data); uses rd_est() defined here and MASS::mvrnorm
+# Outputs    : none (functions only)
+# Author     : Ignacio G. Ribelles
+# Created    : 2026-10-16
+# Change log : 2026-10-16  IGR  Initial version
+#              2026-11-12  IGR  Random-fraction tipping point replaced by a
+#                               delta-adjusted (pattern-mixture) tipping point
+# Notes      : Tested in tests/testthat/test-bridging.R.
+# -----------------------------------------------------------------------------
 # Simulate a randomised all-comers trial with a clinical trial assay (CTA) measured in everyone
 # and a final CDx measured only where a bridging sample is available.
 # miss: "none", "MCAR", "MAR" (depends on CTA), "MNAR" (depends on the CDx result itself),
