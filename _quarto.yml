@@ -5,7 +5,7 @@ project:
 book:
   title: "Diagnostic and Biomarker Statistics in R"
   subtitle: "Analytical validation, clinical performance, cut-offs, prognostic models and SAPs, on simulated data"
-  author: "Ignacio Garcia-Ribelles"
+  author: "Ignacio Garcia Ribelles"
   repo-url: https://github.com/Ngarciar24/diagnostic-biomarker-statistics
   repo-actions: [source, issue]
   chapters:
