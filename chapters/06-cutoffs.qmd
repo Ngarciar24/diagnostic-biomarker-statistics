@@ -62,9 +62,14 @@ out <- do.call(rbind, lapply(rows, function(r) {
              `Clopper-Pearson` = sprintf("%.1f (%.1f-%.1f)", 100 * cp[1], 100 * cp[2], 100 * cp[3]),
              check.names = FALSE)}))
 kable(out, caption = "FDA CIs vs ours. FDA states the PV CIs derive from likelihood-ratio CIs; the PPA/NPA CI method is not stated")
+# The published PPA and NPA (estimate and 95% CI, to one decimal) must be reproduced exactly;
+# the counts must add up to the published cohort (958 subjects, 378 PET+).
+stopifnot(N == 958, pet_pos == 378, pet_neg == 580,
+          identical(out$Wilson[1:2], out$`FDA reported`[1:2]),
+          identical(substr(out$Wilson[3:4], 1, 4), substr(out$`FDA reported`[3:4], 1, 4)))
 ```
 
-Our Wilson intervals reproduce FDA's PPA and NPA CIs to the printed digit (70.8-79.5, 69.4-76.6), so Wilson is the likely method [D: inference, not stated by FDA]. The PV CIs differ slightly because FDA derives them from likelihood-ratio CIs.
+Our Wilson intervals reproduce FDA's PPA and NPA CIs to the printed digit (70.8-79.5, 69.4-76.6), and the chunk above stops the build if they ever stop matching. Wilson is therefore the likely method [D: inference, not stated by FDA]. The PV CIs differ slightly because FDA derives them from likelihood-ratio CIs.
 
 The **PPA/NPA are low (≈75%)** because intermediates count as misses (denominators include all PET+ and PET−). The headline strength is in the categories: **PV 88.5% for positive, 95.3% NPV for negative, 19.9% (191/958) intermediate** ✔. Derived [D] from the counts above (no CI in the FDA summary):
 
