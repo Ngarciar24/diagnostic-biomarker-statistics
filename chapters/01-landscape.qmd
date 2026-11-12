@@ -1,0 +1,87 @@
+---
+title: "The landscape and the vocabulary"
+---
+
+```{r setup}
+#| include: false
+library(knitr)
+source("../R/helpers.R")
+```
+
+Tags: **[S]** primary public source (verified 2026-10-16, see `claims_ledger.csv`), **[Y]** synthesis of standard theory, not a quotation.
+
+## Concept
+
+| Term | Plain meaning | Anchor |
+|---|---|---|
+| Analytical performance | Does the assay measure the analyte correctly? (precision, bias, LoD, linearity, interference) | IVDR Art 2(40) [S] |
+| Scientific validity (of an analyte) | Is the analyte associated with the condition? | IVDR Art 2(38) [S] |
+| Clinical performance | Do results correlate with the clinical condition in the target population? (sens, spec, PPV, NPV, LR) | IVDR Art 2(41) [S] |
+| Clinical validity | Same idea in non-IVDR language: does the marker discriminate the condition | [Y] |
+| Clinical utility | Does using the test improve decisions or outcomes? IVDR defines no such term | [Y] |
+| IVD | Device for in-vitro examination of specimens | – |
+| Companion diagnostic (CDx) | Device "essential for the safe and effective use of a corresponding medicinal product" to select patients | IVDR Art 2(7) [S]; FDA 2014 guidance [S] |
+
+The IVDR defines scientific validity *of an analyte*, not of a device.
+
+## Regulatory anchor
+
+### EU: IVDR 2017/746 (original OJ text read; consolidated text not verified)
+
+| Provision | What it is | Note |
+|---|---|---|
+| Art 47 | Classification of devices (A–D) | **Not** safety requirements |
+| Art 48 | Conformity assessment procedures | CDx consultation at 48(3)/(4) class D, **48(7)/(8) class C** |
+| Art 56 | Performance evaluation and clinical evidence | three pillars in 56(3); clinical performance studies unless justified (56(4)); class C/D report updated at least annually (56(6)) |
+| Art 57 | General requirements for performance studies | |
+| Art 58 | Additional requirements (interventional/invasive); **58(2) CDx studies included** | left-over-sample CDx studies are only notified |
+| Annex I | GSPR; 9.1(a) analytical parameters, 9.1(b) clinical parameters | the list your statistics must cover |
+| Annex VIII | Classification rules; **Rule 3(f) = CDx, class C** | Rule 1 D, 2 C/D, 3 C, 4 C, 5 A, 6 B, 7 B |
+| Annex XIII Part A | Performance evaluation plan (PEP), report (PER), clinical performance study plan 2.3.2 | PEP includes statistical tools and acceptance criteria |
+| Annex XIII Part B | Post-market performance follow-up (PMPF) | |
+
+Consultee for CDx: "a competent authority … under Directive 2001/83/EC or the EMA, as applicable" [S].
+
+**Transition** (Reg (EU) 2024/1860): legacy certificates to 31 Dec 2027; first-time NB devices D 2027, C 2028, B/sterile A 2029 with conditions. COM(2025) 1023 is a *proposal* [S, status unverified].
+
+### Guidance
+
+| Document | Facts |
+|---|---|
+| MDCG 2022-2 (Jan 2022) | General principles of clinical evidence for IVDs; sections on performance evaluation plan/report, scientific validity, analytical and clinical performance, PMPF |
+| ISO 20916:2019 | Good study practice for clinical performance studies using specimens from human subjects; analytical studies out of scope |
+| STARD 2015 | 30 items (BMJ 2015;351:h5527) |
+| QUADAS-2 | 4 domains: patient selection, index test, reference standard, flow and timing |
+| ICH E9 (1998), E9(R1) (2019) | Drug-trial guidelines; used here **by analogy** [Y] |
+
+### US pathways
+
+| Route | Meaning | Verb |
+|---|---|---|
+| 510(k) | substantial equivalence to a predicate | cleared |
+| De Novo | no predicate, low/moderate risk | granted |
+| PMA | class III, scientific review | approved |
+
+The verb mapping is a synthesis [Y]; FDA has no single defining sentence. The Elecsys Phospho-Tau (217P) Plasma test was cleared via 510(k) K261686 (Chapter 6).
+
+## The one-page map
+
+Task → governing document → R tools used in this book.
+
+```{r map}
+m <- read.csv("../question_map.csv")
+m <- m[order(m$day), ]
+kable(m, col.names = c("Task", "Governing document", "R tools", "Chapter"), row.names = FALSE)
+```
+
+CLSI editions as listed on clsi.org on 2026-10-16: EP05 **Ed4 (2025)**, EP06 Ed2 (2020), EP07 Ed3 (2018), EP09c Ed3 (2018), EP12 Ed3 (2023), EP15-A3 (2014), EP17-A2 (2012), EP19 **Ed3 (2022)**, EP24-A2 (2011), EP25 **Ed2 (2023)**, EP26 **Ed2 (2022)**, EP28-A3c (2010), EP35 **Ed2 (2025)**, EP37 (edition not verified). Bold = newer than the edition most often cited in secondary literature.
+
+## Sources
+
+Sourced claims for this chapter (IVDR, MDCG, ISO, FDA pathways, CLSI editions), from `claims_ledger.csv`:
+
+```{r sources-01}
+#| echo: false
+#| results: asis
+show_sources(1, "../claims_ledger.csv")
+```

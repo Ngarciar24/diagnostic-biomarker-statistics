@@ -1,0 +1,46 @@
+project:
+  type: book
+  output-dir: _book
+
+book:
+  title: "Diagnostic and Biomarker Statistics in R"
+  subtitle: "Analytical validation, clinical performance, cut-offs, prognostic models and SAPs, on simulated data"
+  author: "Ignacio Garcia-Ribelles"
+  repo-url: https://github.com/Ngarciar24/diagnostic-biomarker-statistics
+  repo-actions: [source, issue]
+  chapters:
+    - index.qmd
+    - part: "Analytical performance"
+      chapters:
+        - chapters/01-landscape.qmd
+        - chapters/02-precision.qmd
+        - chapters/03-detection-linearity.qmd
+        - chapters/04-method-comparison.qmd
+    - part: "Clinical performance and cut-offs"
+      chapters:
+        - chapters/05-diagnostic-accuracy.qmd
+        - chapters/06-cutoffs.qmd
+        - chapters/07-sample-size.qmd
+    - part: "Biomarkers in drug development and real-world data"
+      chapters:
+        - chapters/08-companion-diagnostics.qmd
+        - chapters/09-sap.qmd
+        - chapters/10-reference-longitudinal.qmd
+        - chapters/11-multimarker-model.qmd
+        - chapters/12-time-to-event.qmd
+  appendices:
+    - mock_sap/sap_template.qmd
+    - mock_sap/sap_ptau217_mock.qmd
+    - mock_sap/r_environment_note.qmd
+    - environment.qmd
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    number-sections: true
+    code-fold: show
+    code-tools: true
+execute:
+  warning: false
+  message: false

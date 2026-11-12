@@ -1,0 +1,60 @@
+# Overview {.unnumbered}
+
+```{r setup}
+#| include: false
+library(knitr)
+```
+
+This book works through the statistics behind an in-vitro diagnostic (IVD) or biomarker from the bench to the clinic, one analysis per chapter, in R. Every dataset is simulated, so each method can be checked against a known truth. The only real numbers are public figures from an FDA decision summary, and they are cited.
+
+The analyses follow the documents that govern them: CLSI EP guidelines for analytical studies, the EU IVDR and FDA guidance for clinical performance and companion diagnostics, and ICH E9(R1) for estimands.
+
+## How each chapter is built
+
+- **Concept**: the question the analysis answers, in plain terms.
+- **Regulatory anchor**: which document governs the design, with what was and was not verified.
+- **Analysis in R**: simulation, the standard analysis, and at least one independent cross-check. A hand implementation is compared with a package, or a formula with a simulation. The book stops rendering if a cross-check fails (`stopifnot`).
+- **Sources**: the sourced claims behind the chapter, from `claims_ledger.csv`, with the date each was checked.
+
+## Conventions
+
+- **[S]**: stated in a primary public source, listed in the chapter's sources.
+- **[Y]**: synthesis of standard theory; not a quotation.
+- **[A]**: assumption made for the simulation.
+- **[D]**: derived by arithmetic from cited counts.
+- "not verified: paywalled": the CLSI texts are not public. Nothing here quotes them, and no design count is stated as a CLSI requirement unless a public CLSI page says so.
+
+## Contents
+
+| Chapter | Topic | Governing documents |
+|---|---|---|
+| 1 | Landscape and vocabulary | IVDR, MDCG 2022-2, ISO 20916, FDA pathways |
+| 2 | Precision and variance components | EP05, EP15 |
+| 3 | Detection capability and linearity | EP17, EP06 |
+| 4 | Method comparison, interference, stability, lots | EP09c, EP07, EP25, EP26 |
+| 5 | Diagnostic accuracy and ROC | EP12, EP24, FDA 2007 guidance, STARD |
+| 6 | Cut-offs, two-cut-off designs, intermediate zone | EP24, EP12, FDA decision summary |
+| 7 | Sample size and power | Buderer, Flahault, Hanley–McNeil |
+| 8 | Companion diagnostics and bridging | FDA CDx guidances, IVDR Art 48 |
+| 9 | Statistical analysis plan | IVDR Annex XIII, ISO 20916, ICH E9 |
+| 10 | Reference intervals, longitudinal biomarkers | EP28, ICH E9(R1) |
+| 11 | Combining markers: logistic model, optimism, calibration | TRIPOD |
+| 12 | Time-to-event outcomes and confounding | ICH E9(R1), STROBE |
+| A–C | Mock SAP, SAP template, SAP in a regulated R environment | |
+
+## Task → governing document → R tools
+
+```{r map}
+m <- read.csv("question_map.csv")
+m <- m[order(m$day), ]
+kable(m, col.names = c("Task", "Governing document", "R tools", "Chapter"), row.names = FALSE)
+```
+
+## Reproducibility
+
+- `renv.lock` pins every package.
+- `tests/testthat/` holds the unit tests of the helper functions in `R/`.
+- `python/` re-derives the primary endpoints of the mock SAP with SQL and Python, outside R.
+- GitHub Actions runs the tests and the Python checks, re-renders this book from scratch, and publishes it on every push.
+
+The R session used for the last render is in the appendix.

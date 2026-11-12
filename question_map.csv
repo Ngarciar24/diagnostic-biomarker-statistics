@@ -1,0 +1,25 @@
+question,governing_document,r_tools,day
+"How imprecise is the assay (within-run, between-day, within-lab)?","CLSI EP05 (Ed4, 2025; A3 design 20x2x2); lab verification EP15-A3","VCA::anovaVCA, lme4::lmer",2
+"Does a lab reproduce the manufacturer's precision/bias claim?","CLSI EP15-A3 (+IG1/IG2, 2021)","chi-square upper verification limit (hand)",2
+"What is the lowest concentration reliably detected / quantified?","CLSI EP17-A2 (2012)","parametric and nonparametric LoB/LoD (hand); bootstrap",3
+"Is the assay linear over the claimed range?","CLSI EP06 Ed2 (2020)","lm with polynomial terms; allowable deviation",3
+"Do two methods agree? What is the bias at a decision level?","CLSI EP09c Ed3 (2018)","mcr::mcreg (Deming, Passing-Bablok), Bland-Altman",4
+"Does an interferent bias the result?","CLSI EP07 Ed3 (2018), EP37 tables","paired differences + CI (hand)",4
+"How long is a reagent stable?","CLSI EP25 Ed2 (2023)","lm over time with acceptance limit",4
+"Does a new reagent lot shift results?","CLSI EP26 Ed2 (2022)","paired lot comparison (hand)",4
+"Sensitivity/specificity/PPV/NPV with CI?","CLSI EP12 Ed3 (2023); FDA 2007 statistical guidance; STARD 2015","binom, epiR::epi.tests, helpers::report_2x2",5
+"Compare two tests on the same patients?","FDA 2007 guidance; McNemar","DTComPair, mcnemar.test",5
+"Candidate vs non-reference comparator: what are the metrics called?","FDA 2007 guidance (PPA/NPA, not sensitivity/specificity)","helpers::report_2x2 (label PPA/NPA)",5
+"ROC curve, AUC, compare AUCs?","CLSI EP24-A2 (2011); DeLong 1988","pROC::roc, ci.auc, roc.test",5
+"How to choose and validate a cut-off (one or two)?","EP24-A2; EP12 Ed3; FDA decision summaries","cutpointr, OptimalCutpoints, helpers::classify_two_cut",6
+"How many subjects for a sensitivity/specificity target?","Buderer 1996; Flahault 2005; Annex XIII Part A 2.3.2 (population size)","helpers::n_buderer, presize, MKmisc, pROC::power.roc.test",7
+"How to bridge a clinical-trial assay to the final CDx?","FDA 2014 CDx guidance; FDA 2016 draft codevelopment; IVDR Art 48(7)-(8), Annex IX 5.2","simulation (R/bridging.R), mice",8
+"What goes in the statistical analysis plan?","IVDR Annex XIII Part A 2.3.2; ISO 20916:2019; ICH E9 / E9(R1) by analogy; MDCG 2022-2","mock_sap/",9
+"What is the reference interval?","CLSI EP28-A3c (2010)","quantile, boot, refineR",10
+"Is a change in a patient's serial results real?","reference change value (RCV); monitoring is a separate intended use","lme4, formula (hand)",10
+"Which CE class and route?","IVDR Annex VIII Rules 1-7; Art 47-48","-",1
+"What must the performance evaluation contain?","IVDR Art 56, Annex XIII Part A (PEP, PER); Part B (PMPF)","-",1
+"Does adding covariates to the marker improve prediction, and is the model calibrated?","TRIPOD / TRIPOD+AI; Steyerberg & Vergouwe 2014","glm, rms::validate, rms::val.prob, decision curve (hand)","11"
+"Does the model transport to a new care setting?","external validation; calibration-in-the-large and slope","glm with offset, intercept recalibration","11"
+"Does a baseline marker predict time to progression?","Kaplan-Meier, Cox; Grambsch & Therneau PH test","survival::survfit, coxph, cox.zph; timeROC","12"
+"Does a treatment work in routine-care data?","ICH E9(R1) estimands; STROBE; propensity scores (Austin 2011); E-value","glm propensity model, IPTW Cox (robust SE), SMD, E-value (hand)","12"

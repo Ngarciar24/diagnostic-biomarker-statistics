@@ -1,0 +1,131 @@
+---
+title: "Precision and variance components (EP05, EP15)"
+---
+
+```{r setup}
+#| include: false
+source("../R/helpers.R")
+suppressMessages({library(VCA); library(lme4); library(brms); library(knitr)})
+```
+
+Tags: **[S]** primary public source, **[Y]** synthesis of standard theory, not a quotation.
+
+## Concept
+
+- **Repeatability** = within-run noise. **Between-run**, **between-day** add drift. **Within-laboratory** precision = all three together (one site, one instrument).
+- Variances add; SDs do not. `SD_within-lab = sqrt(σ²_day + σ²_run + σ²_rep)`. [Y]
+- CV% = 100·SD/mean *at a given level*. Always report at medical decision levels.
+
+## Regulatory anchor
+
+| Item | Statement | Tag |
+|---|---|---|
+| EP05 current edition | **Ed4, published 2025-12-11** (supersedes EP05-A3, 2014) | [S] clsi.org |
+| EP05-A3 single-site design | 20 days × 2 runs × 2 replicates per sample | [S] CLSI 2014 press release |
+| EP05 Ed4 design | *not verified: paywalled* | – |
+| EP15 | EP15-A3 (2014, reaffirmed 2019), no newer edition listed; completed within 5 working days; bias: ≥25 measurements over ≥5 days | [S] clsi.org |
+| What is reported | Repeatability and within-lab SD and CV% with 95% CI, per level | [Y] |
+
+## Analysis in R (simulated data)
+
+True values: day SD 1.2, run SD 1.5, repeatability SD 2.0 at a mean of 100.
+
+```{r sim}
+D <- 20; R <- 2; K <- 2
+d <- sim_ep05(seed = 20, D = D, R = R, K = K)   # R/helpers.R; reused in Chapter 7
+```
+
+### Three estimators, one answer: a cross-check
+
+```{r three}
+fit_vca <- anovaVCA(y ~ day/run, d)
+vca <- fit_vca$aov.tab[c("day", "day:run", "error"), "VC"]
+hand <- ep05_anova(d$y, d$day, d$run, K)[c("day", "run", "repeatability")]
+m <- lmer(y ~ 1 + (1 | day) + (1 | day:run), d)
+vc <- as.data.frame(VarCorr(m))
+reml <- vc$vcov[match(c("day", "day:run", "Residual"), vc$grp)]
+cmp <- data.frame(component = c("day", "run", "repeatability"),
+                  hand_ANOVA = unname(hand), VCA_anovaVCA = vca, lme4_REML = reml)
+kable(cmp, digits = 4, caption = "Variance components: three estimators")
+stopifnot(isTRUE(all.equal(cmp$hand_ANOVA, cmp$VCA_anovaVCA, tolerance = 1e-8)),
+          isTRUE(all.equal(cmp$VCA_anovaVCA, cmp$lme4_REML, tolerance = 1e-4)))
+```
+
+Balanced data: ANOVA and REML coincide unless a component is truncated at 0.
+
+### The standard precision table
+
+```{r table}
+inf <- VCAinference(fit_vca, alpha = 0.05, VarVC = TRUE)
+mu <- mean(d$y)
+sdt <- inf$ConfInt$SD$TwoSided
+cvt <- inf$ConfInt$CV$TwoSided
+sdest <- fit_vca$aov.tab[, "SD"]; names(sdest) <- rownames(fit_vca$aov.tab)
+tab <- data.frame(
+  Component = c("Repeatability", "Between-run", "Between-day", "Within-laboratory"),
+  SD  = sdest[c("error", "day:run", "day", "total")],
+  `SD 95% CI` = sprintf("%.2f - %.2f", sdt[c("error", "day:run", "day", "total"), "LCL"],
+                        sdt[c("error", "day:run", "day", "total"), "UCL"]),
+  `CV%` = 100 * sdest[c("error", "day:run", "day", "total")] / mu,
+  `CV% 95% CI` = sprintf("%.2f - %.2f", cvt[c("error", "day:run", "day", "total"), "LCL"],
+                         cvt[c("error", "day:run", "day", "total"), "UCL"]),
+  check.names = FALSE, row.names = NULL)
+kable(tab, digits = 2, caption = sprintf("Precision at mean %.1f (n = %d, %d days)", mu, nrow(d), D))
+```
+
+Note the lower CI limit of 0 for day and run: with 19 and 20 df the data cannot exclude zero. The within-lab row has ~70 effective df (Satterthwaite), not 79. [Y]
+
+### Verification against a claim (EP15 logic, [Y])
+
+```{r uvl}
+# Suppose a manufacturer claims repeatability SD = 2.0; we ran 5 days x 5 replicates (df = 20)
+s_obs <- 2.3; nu <- 20; claim <- 2.0
+uvl <- claim * sqrt(qchisq(0.95, nu) / nu)
+data.frame(claim, observed = s_obs, df = nu, UVL = round(uvl, 3),
+           verified = s_obs <= uvl)
+```
+
+### Bayesian version (brms)
+
+Weakly informative half-normal priors on all SDs; fitted once and cached in `cache/`.
+
+```{r brms}
+#| results: hide
+cache <- "../cache/ep05_brms_draws.rds"           # posterior draws only (a few KB); delete to refit (about 2 min)
+if (file.exists(cache)) {
+  dr <- readRDS(cache)
+} else {
+  b <- brm(y ~ 1 + (1 | day) + (1 | day:run), d, chains = 2, iter = 2000, cores = 2,
+           prior = c(prior(normal(100, 20), class = Intercept),
+                     prior(normal(0, 3), class = sd),
+                     prior(normal(0, 3), class = sigma)),
+           backend = "rstan", seed = 1, refresh = 0, silent = 2)
+  dr <- as.data.frame(as_draws_df(b))[, c("b_Intercept", "sd_day__Intercept", "sd_day:run__Intercept", "sigma")]
+  saveRDS(dr, cache)
+}
+```
+
+```{r brms-compare}
+sd_draws <- cbind(day = dr$sd_day__Intercept, run = dr$`sd_day:run__Intercept`,
+                  rep = dr$sigma)
+wl <- sqrt(rowSums(sd_draws^2))
+q <- function(x) sprintf("%.2f (%.2f - %.2f)", median(x), quantile(x, .025), quantile(x, .975))
+kable(data.frame(
+  Component = c("Between-day", "Between-run", "Repeatability", "Within-lab"),
+  `Bayes median SD (95% CrI)` = c(q(sd_draws[, "day"]), q(sd_draws[, "run"]),
+                                  q(sd_draws[, "rep"]), q(wl)),
+  `Frequentist SD` = round(c(sdest["day"], sdest["day:run"], sdest["error"], sdest["total"]), 2),
+  check.names = FALSE), caption = "Bayes vs ANOVA")
+```
+
+**Differences to discuss.** The Bayesian SDs for day and run are never exactly 0 and are pulled by the prior when levels are few. Credible ≠ confidence interval. For a *claim* a regulator expects the CLSI-style estimate; use Bayes sparingly, as supportive or as a way to borrow strength across levels or sites. [Y]
+
+## Sources
+
+Everything marked [Y] above is synthesis and is not listed as a sourced claim.
+
+```{r sources-02}
+#| echo: false
+#| results: asis
+show_sources(2, "../claims_ledger.csv")
+```
