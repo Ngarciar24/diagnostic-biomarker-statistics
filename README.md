@@ -104,3 +104,7 @@ cache/                      posterior draws of the one Stan model, so the book r
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+## How it was made
+
+The book, its helper functions, the tests and the Python checks were built with the help of Claude Code, an AI coding assistant. I set the scope and reviewed the code and text. The evidence that the content is right lies in the repository itself: the unit tests, the Python re-derivation of the SAP endpoints, and `claims_ledger.csv`, which records the source and the date checked for every sourced claim.
